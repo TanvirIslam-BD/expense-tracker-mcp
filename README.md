@@ -22,6 +22,10 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
 > the server itself only receives the already-extracted amount, category, vendor,
 > and date via `add_expense`; it does not do OCR.
 
+> 📘 **Continuing this project?** Read [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md)
+> first — it's the deep reference for architecture, decisions, the storage/deploy
+> incidents and their fixes, and open questions.
+
 - **SDK:** official `@modelcontextprotocol/sdk` (v1.29+), schemas validated with `zod`
 - **Transport:** dual — **stdio** for local dev / MCP Inspector, **Streamable HTTP** (stateless) for hosted deployment
 - **Storage:** pluggable `ExpenseStore` interface — in-memory by default, or a durable libSQL/Turso-backed store (see "Storage & persistence" below; **required** for hosted use)
