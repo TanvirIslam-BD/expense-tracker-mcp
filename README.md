@@ -6,6 +6,21 @@ written in TypeScript and packaged for the [MCPize](https://mcpize.com) marketpl
 Record expenses, set monthly budgets, and generate spending summaries — from Claude,
 Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatically.
 
+<p align="center">
+  <img src="./assets/screenshot-1-chatgpt-mobile.png" alt="Spending report in ChatGPT mobile" width="220">
+  <img src="./assets/screenshot-2-claude-mobile.png" alt="Spending report in Claude mobile" width="220">
+  <img src="./assets/screenshot-5-chatgpt-receipt.png" alt="Logging an expense from a receipt photo in ChatGPT" width="220">
+  <img src="./assets/screenshot-6-claude-receipt.png" alt="Logging an expense from a receipt photo in Claude" width="220">
+</p>
+<p align="center">
+  <img src="./assets/screenshot-3-desktop-log.png" alt="Logging expenses and summarizing by category" width="420">
+  <img src="./assets/screenshot-4-desktop-budget.png" alt="Budget status and category breakdown" width="420">
+</p>
+
+> Receipt photos are read by the host model's vision capability (Claude/ChatGPT) —
+> the server itself only receives the already-extracted amount, category, vendor,
+> and date via `add_expense`; it does not do OCR.
+
 - **SDK:** official `@modelcontextprotocol/sdk` (v1.29+), schemas validated with `zod`
 - **Transport:** dual — **stdio** for local dev / MCP Inspector, **Streamable HTTP** (stateless) for hosted deployment
 - **Storage:** pluggable `ExpenseStore` interface; ships with a dependency-free in-memory store (optional JSON persistence)
