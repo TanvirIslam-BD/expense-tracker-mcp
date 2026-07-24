@@ -94,24 +94,41 @@ async function startHttp(): Promise<void> {
   app.post("/mcp", async (req: Request, res: Response) => {
     try {
       const userId = resolveUserId(req);
-      // TEMPORARY DIAGNOSTIC (remove after verifying per-user isolation on
-      // MCPize): logs the resolved user id + the header NAMES the host forwards
-      // per request — never header values, so no tokens leak. Lets us see
-      // whether the caller identity is stable across an add/list pair (real
-      // isolation) or varies/absent (everything collapses to one bucket, or
-      // each call lands in a different bucket).
-      {
-        const method =
-          req.body && typeof req.body === "object" ? (req.body as { method?: string }).method : undefined;
-        const toolName =
-          req.body && typeof req.body === "object"
-            ? (req.body as { params?: { name?: string } }).params?.name
-            : undefined;
-        console.error(
-          `[req] method=${method ?? "?"}${toolName ? ` tool=${toolName}` : ""} userId=${userId} mcpizeUserId=${req.header("x-mcpize-user-id") || "-"}`,
-        );
+      const body = (req.body && typeof req.body === "object" ? req.body : {}) as {
+        method?: string;
+        id?: unknown;
+        params?: { name?: string };
+      };
+      const method = body.method;
+
+      // TEMPORARY DIAGNOSTIC (remove after per-user isolation is confirmed on
+      // MCPize): logs resolved user id + the mcpize user id per request. Header
+      // values other than the (non-secret) user id are never logged.
+      console.error(
+        `[req] method=${method ?? "?"}${body.params?.name ? ` tool=${body.params.name}` : ""} userId=${userId ?? "(none)"} mcpizeUserId=${req.header("x-mcpize-user-id") || "-"}`,
+      );
+
+      // Fail closed: methods that read or write a user's data require an
+      // identified user. Without one we refuse rather than touch a shared
+      // bucket. Discovery (initialize, tools/list, …) is still allowed so
+      // clients can connect and list capabilities.
+      const DATA_METHODS = new Set(["tools/call", "resources/read"]);
+      if (!userId && method && DATA_METHODS.has(method)) {
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id: body.id ?? null,
+          error: {
+            code: -32001,
+            message:
+              "No authenticated user identity on the request (missing " +
+              "x-mcpize-user-id / user token). This server refuses to read or " +
+              "write expense data without an identified user.",
+          },
+        });
+        return;
       }
-      const server = buildServer(store, userId);
+
+      const server = buildServer(store, userId ?? "__unidentified__");
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });

@@ -137,11 +137,31 @@ authorization, traceparent, ...
 (`x-mcp-default-currency`, `x-mcp-turso-database-url`) — informational; the
 server reads config from the process env, not these headers.
 
+### "Data leakage" scare — it was the same account, not a cross-user leak
+After the fix, testing from both the MCPize playground and ChatGPT showed the
+*same* expenses in both — which looked alarmingly like one user seeing
+another's data. The runtime logs settled it: both clients resolved to the
+**same** `x-mcpize-user-id` (`a8b3a6f6-…`) because both authenticated as the
+**same MCPize account** (the developer). That's one person seeing their own data
+in two apps — expected, not a leak. Two *different* MCPize accounts get
+different UUIDs and are isolated. To actually prove isolation, test with a
+second MCPize account; a shared-account test can't show it either way.
+
+### Fail-closed identity (security hardening)
+`resolveUserId` returns `string | null`. If no stable identity is present
+(no `x-mcpize-user-id`/`x-user-id`, no auth token, no `DEFAULT_USER_ID`), it
+returns **null**, and the HTTP handler **rejects** `tools/call` and
+`resources/read` with a JSON-RPC error rather than falling into a shared
+`"public"` bucket. Rationale: for a finance server, letting unrelated
+unidentified callers share a bucket would be a real privacy breach. Discovery
+methods (`initialize`, `tools/list`, …) are still allowed so clients can
+connect. Pinned by `tests/util.test.ts` ("FAILS CLOSED …").
+
 ### Lesson for any future HTTP-hosted MCP work
 Never derive identity by hashing the `Authorization` token on a platform that
 issues short-lived/rotating tokens — you'll silently fragment every user's data
 across per-request buckets. Key on the platform's explicit stable user-id header
-(`x-mcpize-user-id` here).
+(`x-mcpize-user-id` here), and fail closed when no stable identity exists.
 
 > Temporary per-request diagnostic logging lives in `src/index.ts` (the `[req] …`
 > line). Remove it once isolation is confirmed working in production.

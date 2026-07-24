@@ -68,26 +68,49 @@ describe("dates", () => {
 });
 
 describe("resolveUserId", () => {
+  it("prioritises x-mcpize-user-id (MCPize's stable subscriber id) above all", () => {
+    // Even with other id headers and a rotating auth token present, the
+    // MCPize subscriber id must win — this is the fix for the isolation bug.
+    expect(
+      resolveUserId(
+        fakeReq({
+          "x-mcpize-user-id": "uuid-sub-1",
+          "x-user-id": "bob",
+          authorization: "Bearer rotating-token",
+        }),
+      ),
+    ).toBe("uuid-sub-1");
+  });
+
   it("prefers explicit user headers", () => {
     expect(resolveUserId(fakeReq({ "x-mcpize-user": "alice" }))).toBe("alice");
     expect(resolveUserId(fakeReq({ "x-user-id": "bob" }))).toBe("bob");
-    // x-mcpize-user wins over x-user-id.
-    expect(
-      resolveUserId(fakeReq({ "x-mcpize-user": "alice", "x-user-id": "bob" })),
-    ).toBe("alice");
   });
 
-  it("hashes auth tokens into a stable, isolating id", () => {
+  it("hashes a stable auth token into a stable, isolating id", () => {
     const a1 = resolveUserId(fakeReq({ authorization: "Bearer token-A" }));
     const a2 = resolveUserId(fakeReq({ authorization: "Bearer token-A" }));
     const b = resolveUserId(fakeReq({ authorization: "Bearer token-B" }));
-    expect(a1).toBe(a2); // stable
-    expect(a1).not.toBe(b); // different token -> different id
-    expect(a1.startsWith("u_")).toBe(true);
+    expect(a1).toBe(a2); // stable for the same token
+    expect(a1).not.toBe(b); // different token -> different bucket (no co-mingling)
+    expect(a1?.startsWith("u_")).toBe(true);
   });
 
-  it("falls back when unauthenticated", () => {
-    expect(resolveUserId(fakeReq({}))).toBe(process.env.DEFAULT_USER_ID || "public");
+  it("FAILS CLOSED (null) when unidentified and no DEFAULT_USER_ID", () => {
+    const saved = process.env.DEFAULT_USER_ID;
+    delete process.env.DEFAULT_USER_ID;
+    // No stable bucket for anonymous callers — a finance server must not
+    // co-mingle unidentified users.
+    expect(resolveUserId(fakeReq({}))).toBeNull();
+    if (saved !== undefined) process.env.DEFAULT_USER_ID = saved;
+  });
+
+  it("uses DEFAULT_USER_ID as an opt-in single-user fallback", () => {
+    const saved = process.env.DEFAULT_USER_ID;
+    process.env.DEFAULT_USER_ID = "solo";
+    expect(resolveUserId(fakeReq({}))).toBe("solo");
+    if (saved === undefined) delete process.env.DEFAULT_USER_ID;
+    else process.env.DEFAULT_USER_ID = saved;
   });
 });
 

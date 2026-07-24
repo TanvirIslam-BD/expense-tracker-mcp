@@ -78,12 +78,11 @@ export function isValidMonth(s: string): boolean {
  * subscribers can never see each other's expenses. Explicit id headers win;
  * otherwise the auth token is hashed into a stable opaque id.
  */
-export function resolveUserId(req: Request): string {
-  // `x-mcpize-user-id` is MCPize's stable per-subscriber identifier and MUST be
-  // checked first. MCPize rotates the `authorization` bearer token on every
-  // request, so hashing it (below) produces a different bucket per call and
-  // breaks isolation entirely — it's only a last-ditch fallback for non-MCPize
-  // HTTP clients that send a stable token.
+export function resolveUserId(req: Request): string | null {
+  // 1. Stable per-subscriber id from the host. MCPize sends `x-mcpize-user-id`;
+  //    this MUST be checked first. (MCPize rotates the `authorization` bearer
+  //    token per request, so hashing it would fragment a user's data across
+  //    buckets — see step 2.)
   const explicit = (
     req.header("x-mcpize-user-id") ||
     req.header("x-mcpize-user") ||
@@ -92,12 +91,21 @@ export function resolveUserId(req: Request): string {
   ).trim();
   if (explicit) return explicit;
 
+  // 2. A *stable* API token identifies a non-MCPize client. Different clients
+  //    have different tokens → different hashes, so this never co-mingles
+  //    users; at worst it fragments one client whose token rotates.
   const auth = (req.header("authorization") || req.header("x-api-key") || "").trim();
   if (auth) {
     return "u_" + createHash("sha256").update(auth).digest("hex").slice(0, 16);
   }
 
-  return process.env.DEFAULT_USER_ID || "public";
+  // 3. Opt-in single-user mode for self-hosting.
+  if (process.env.DEFAULT_USER_ID) return process.env.DEFAULT_USER_ID;
+
+  // 4. Fail closed. No identity → no data access. We deliberately do NOT fall
+  //    into a shared bucket: for a finance server, letting unrelated
+  //    unidentified callers share data would be a real privacy breach.
+  return null;
 }
 
 // ---------------------------------------------------------------------------
