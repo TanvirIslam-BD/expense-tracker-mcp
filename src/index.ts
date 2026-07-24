@@ -94,6 +94,23 @@ async function startHttp(): Promise<void> {
   app.post("/mcp", async (req: Request, res: Response) => {
     try {
       const userId = resolveUserId(req);
+      // TEMPORARY DIAGNOSTIC (remove after verifying per-user isolation on
+      // MCPize): logs the resolved user id + the header NAMES the host forwards
+      // per request — never header values, so no tokens leak. Lets us see
+      // whether the caller identity is stable across an add/list pair (real
+      // isolation) or varies/absent (everything collapses to one bucket, or
+      // each call lands in a different bucket).
+      {
+        const method =
+          req.body && typeof req.body === "object" ? (req.body as { method?: string }).method : undefined;
+        const toolName =
+          req.body && typeof req.body === "object"
+            ? (req.body as { params?: { name?: string } }).params?.name
+            : undefined;
+        console.error(
+          `[req] method=${method ?? "?"}${toolName ? ` tool=${toolName}` : ""} userId=${userId} headers=[${Object.keys(req.headers).join(",")}]`,
+        );
+      }
       const server = buildServer(store, userId);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
