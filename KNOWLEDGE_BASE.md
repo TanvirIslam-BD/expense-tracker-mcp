@@ -101,36 +101,50 @@ new file and wire it into `createStore()`.
 
 ---
 
-## 4. Per-user data isolation — designed yes, production UNCONFIRMED
-
-**This is an open question, not a settled fact. Read carefully.**
+## 4. Per-user data isolation — how it works (and the bug that hid it)
 
 Every row is tagged with a `userId` and the store only returns matching rows —
 verified in `tests/store.test.ts` (alice never sees bob's data). So the *storage
 layer* isolates correctly.
 
 `userId` is derived per request by `resolveUserId` (`src/util.ts`), in priority:
-1. `x-mcpize-user` / `x-user-id` header, else
-2. SHA-256 hash of `Authorization` / `x-api-key` (distinct token → distinct
-   stable bucket), else
-3. fallback constant `"public"`.
+1. **`x-mcpize-user-id`** header — MCPize's stable per-subscriber id. **This is
+   the one that matters in production.**
+2. `x-mcpize-user` / `x-user-id` — other explicit id headers.
+3. SHA-256 hash of `Authorization` / `x-api-key` — last-ditch fallback for
+   non-MCPize HTTP clients that send a *stable* token.
+4. fallback constant `"public"`.
 
-**The catch:** real per-subscriber isolation only happens if MCPize forwards
-something unique per subscriber in one of those headers. This has **not** been
-confirmed against MCPize's actual behavior.
-- If MCPize forwards each subscriber's own key/id → isolated. ✅
-- If it forwards nothing identifying → everyone lands in `"public"` → **shared
-  data.** ❌
-- In the **playground**, there's likely no per-subscriber auth, so all test
-  traffic currently shares the `"public"` bucket. Fine for testing persistence;
-  does not exercise isolation.
+### The bug (fixed) — why every read came back empty on the durable store
+After TursoStore went live, reads *still* returned nothing. Diagnostic logging
+of the resolved `userId` per request revealed that **every single request got a
+different `userId`** — including calls within one chat. Cause:
 
-**To resolve:** either (a) add temporary logging of the resolved `userId` +
-source header, install as two subscribers, and check the logs differ; or (b) use
-MCPize's **Custom Headers Configuration** (Secrets page) to require each
-subscriber to supply an identifying header at install — `resolveUserId` already
-turns it into a stable bucket. Until one of these is done, treat isolation as
-"implemented but unverified in production."
+- `resolveUserId` originally keyed on hashing the `Authorization` header, and
+- **MCPize rotates the `Authorization` bearer token on every request.**
+
+So `add_expense` wrote under one hash-bucket and `list_expenses` read under a
+different one — data was being saved to Turso correctly, just never found again.
+
+The request headers MCPize actually forwards (captured from runtime logs):
+```
+host, content-length, content-type, mcp-protocol-version, accept,
+x-mcp-default-currency, x-mcp-turso-database-url, x-mcpize-user-id,
+authorization, traceparent, ...
+```
+`x-mcpize-user-id` is the stable subscriber identity. **Fix: check it first**
+(done). Note MCPize also forwards service variables as `x-mcp-*` headers
+(`x-mcp-default-currency`, `x-mcp-turso-database-url`) — informational; the
+server reads config from the process env, not these headers.
+
+### Lesson for any future HTTP-hosted MCP work
+Never derive identity by hashing the `Authorization` token on a platform that
+issues short-lived/rotating tokens — you'll silently fragment every user's data
+across per-request buckets. Key on the platform's explicit stable user-id header
+(`x-mcpize-user-id` here).
+
+> Temporary per-request diagnostic logging lives in `src/index.ts` (the `[req] …`
+> line). Remove it once isolation is confirmed working in production.
 
 ---
 

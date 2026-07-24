@@ -79,7 +79,13 @@ export function isValidMonth(s: string): boolean {
  * otherwise the auth token is hashed into a stable opaque id.
  */
 export function resolveUserId(req: Request): string {
+  // `x-mcpize-user-id` is MCPize's stable per-subscriber identifier and MUST be
+  // checked first. MCPize rotates the `authorization` bearer token on every
+  // request, so hashing it (below) produces a different bucket per call and
+  // breaks isolation entirely — it's only a last-ditch fallback for non-MCPize
+  // HTTP clients that send a stable token.
   const explicit = (
+    req.header("x-mcpize-user-id") ||
     req.header("x-mcpize-user") ||
     req.header("x-user-id") ||
     ""

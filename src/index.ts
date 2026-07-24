@@ -108,7 +108,7 @@ async function startHttp(): Promise<void> {
             ? (req.body as { params?: { name?: string } }).params?.name
             : undefined;
         console.error(
-          `[req] method=${method ?? "?"}${toolName ? ` tool=${toolName}` : ""} userId=${userId} headers=[${Object.keys(req.headers).join(",")}]`,
+          `[req] method=${method ?? "?"}${toolName ? ` tool=${toolName}` : ""} userId=${userId} mcpizeUserId=${req.header("x-mcpize-user-id") || "-"}`,
         );
       }
       const server = buildServer(store, userId);
