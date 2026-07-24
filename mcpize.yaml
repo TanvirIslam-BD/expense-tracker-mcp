@@ -1,0 +1,44 @@
+# mcpize.yaml — MCPize deployment configuration
+# Docs: https://mcpize.com/developers/publish-mcp-server
+version: 1
+name: expense-tracker
+description: |
+  Personal expense tracker MCP server. Record expenses, set monthly budgets,
+  and generate spending summaries and reports. Each subscriber's data is
+  isolated automatically.
+
+# Runtime: typescript | python | php | container
+runtime: typescript
+entry: src/index.ts
+
+# Build configuration
+build:
+  install: npm ci
+  command: npm run build
+
+# Start command — hosted over HTTP (Streamable HTTP transport).
+# MCPize/Cloud Run inject PORT, which the server auto-detects to run in HTTP mode.
+startCommand:
+  type: http
+  command: node dist/index.js
+
+# --- Optional: per-subscriber credentials -----------------------------------
+# This server isolates data per subscriber automatically from the request's
+# auth header, so no credential is strictly required. If you want subscribers
+# to supply an explicit identity/API token, uncomment below:
+#
+# credentials:
+#   - name: EXPENSE_USER_TOKEN
+#     required: false
+#     description: Optional token that scopes your expense data.
+#     mapping:
+#       env: EXPENSE_USER_TOKEN
+#     credentials_mode: per_user
+#
+# --- Optional: publisher secrets (your own infra keys) -----------------------
+# secrets:
+#   - name: DATABASE_URL
+#     required: false
+#     description: Postgres connection string for durable storage.
+#
+# Note: pricing tiers are configured in the MCPize Dashboard, not in this file.
