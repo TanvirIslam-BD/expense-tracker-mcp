@@ -38,12 +38,15 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
 | Tool | Description |
 | --- | --- |
 | `add_expense` | Record an expense (`amount`, `category`, `description?`, `date?`, `currency?`) |
-| `list_expenses` | List expenses, newest first, with category / date-range filters |
+| `add_expenses` | Record many expenses in one call (batch — efficient for receipts / a day's spending) |
+| `list_expenses` | List expenses, newest first, with category / date-range / free-text (`search`) filters |
 | `get_expense` | Fetch one expense by id |
 | `update_expense` | Update fields of an existing expense |
 | `delete_expense` | Delete an expense by id |
 | `summarize_expenses` | Totals grouped by `category` or `month`, over an optional range |
 | `set_budget` | Set a monthly budget (per-category or overall) |
+| `list_budgets` | List all budgets (overall + per-category) |
+| `delete_budget` | Remove a budget (per-category or overall) |
 | `get_budget_status` | Spend vs. budget for a month, with over-budget flags |
 | `list_categories` | Categories used, with counts and totals |
 | `export_expenses` | Export as CSV or JSON |

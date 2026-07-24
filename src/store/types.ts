@@ -46,6 +46,8 @@ export interface ExpenseFilter {
   from?: string;
   /** Inclusive end date, YYYY-MM-DD. */
   to?: string;
+  /** Case-insensitive substring matched against description and category. */
+  search?: string;
   limit?: number;
 }
 
@@ -60,6 +62,8 @@ export interface ExpenseStore {
   init(): Promise<void>;
 
   addExpense(expense: NewExpense): Promise<Expense>;
+  /** Insert several expenses at once (one round trip where the backend supports it). */
+  addExpenses(expenses: NewExpense[]): Promise<Expense[]>;
   getExpense(userId: string, id: string): Promise<Expense | null>;
   listExpenses(userId: string, filter?: ExpenseFilter): Promise<Expense[]>;
   updateExpense(userId: string, id: string, patch: ExpensePatch): Promise<Expense | null>;

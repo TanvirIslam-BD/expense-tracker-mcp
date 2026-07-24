@@ -109,6 +109,53 @@ export function resolveUserId(req: Request): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Category inference — a best-effort keyword classifier used only when the
+// caller doesn't supply a category, so no expense ever ends up category-less
+// (which would silently drop rows from category reports). The client model is
+// usually a better classifier and will pass an explicit category; this is the
+// server-side safety net. Rules are checked in order; first match wins.
+// ---------------------------------------------------------------------------
+
+const CATEGORY_RULES: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["rent", ["rent", "landlord", "lease"]],
+  ["utilities", ["electricity", "electric bill", "water bill", "utility", "utilities", "internet", "wifi", "broadband", "gas bill"]],
+  ["transport", ["uber", "lyft", "taxi", "cab", "bus", "train", "metro", "subway", "fuel", "petrol", "parking", "toll", "flight", "fare", "ride"]],
+  ["food", ["coffee", "latte", "cafe", "restaurant", "lunch", "dinner", "breakfast", "grocery", "groceries", "snack", "pizza", "burger", "meal", "dining", "brunch", "bakery", "starbucks", "mcdonald"]],
+  ["entertainment", ["netflix", "spotify", "movie", "cinema", "concert", "gaming", "hulu", "disney", "subscription"]],
+  ["shopping", ["amazon", "walmart", "target", "clothes", "clothing", "shirt", "shoes", "mall", "electronics"]],
+  ["health", ["pharmacy", "medicine", "doctor", "hospital", "clinic", "dental", "dentist", "gym", "fitness", "medical"]],
+  ["travel", ["hotel", "airbnb", "vacation", "resort", "booking"]],
+  ["bills", ["bill", "insurance", "premium"]],
+];
+
+/**
+ * Infer a category from free text (usually the expense note). Returns
+ * "uncategorized" when nothing matches, so the result is always a usable,
+ * non-empty category.
+ */
+export function categorize(text: string | undefined | null): string {
+  const t = (text ?? "").toLowerCase();
+  if (t.trim()) {
+    for (const [category, keywords] of CATEGORY_RULES) {
+      if (keywords.some((k) => t.includes(k))) return category;
+    }
+  }
+  return "uncategorized";
+}
+
+/**
+ * Resolve the category to store: an explicit category (normalised) wins;
+ * otherwise infer from the note; otherwise "uncategorized".
+ */
+export function resolveCategory(
+  provided: string | undefined | null,
+  note: string | undefined | null,
+): string {
+  if (provided && provided.trim()) return provided.trim().toLowerCase();
+  return categorize(note);
+}
+
+// ---------------------------------------------------------------------------
 // Presentation — the client-facing shape of an expense (major units, no
 // internal userId leak).
 // ---------------------------------------------------------------------------

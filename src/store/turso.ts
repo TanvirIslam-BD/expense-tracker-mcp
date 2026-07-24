@@ -30,33 +30,35 @@ export class TursoStore implements ExpenseStore {
   }
 
   async init(): Promise<void> {
-    await this.client.execute(`
-      CREATE TABLE IF NOT EXISTS expenses (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        amount_minor INTEGER NOT NULL,
-        currency TEXT NOT NULL,
-        category TEXT NOT NULL,
-        description TEXT NOT NULL,
-        date TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )
-    `);
-    await this.client.execute(
-      "CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses (user_id, date)",
+    // Run all schema statements in a single round trip. On a cold start the DB
+    // may be a cross-region hop, so collapsing 3 sequential round trips into 1
+    // meaningfully cuts the first-request latency after a scale-to-zero wake.
+    await this.client.batch(
+      [
+        `CREATE TABLE IF NOT EXISTS expenses (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency TEXT NOT NULL,
+          category TEXT NOT NULL,
+          description TEXT NOT NULL,
+          date TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )`,
+        "CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses (user_id, date)",
+        `CREATE TABLE IF NOT EXISTS budgets (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          category TEXT,
+          amount_minor INTEGER NOT NULL,
+          currency TEXT NOT NULL,
+          period TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE (user_id, category)
+        )`,
+      ],
+      "write",
     );
-    await this.client.execute(`
-      CREATE TABLE IF NOT EXISTS budgets (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        category TEXT,
-        amount_minor INTEGER NOT NULL,
-        currency TEXT NOT NULL,
-        period TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE (user_id, category)
-      )
-    `);
   }
 
   private rowToExpense(row: Record<string, unknown>): Expense {
@@ -108,6 +110,37 @@ export class TursoStore implements ExpenseStore {
     return expense;
   }
 
+  async addExpenses(inputs: NewExpense[]): Promise<Expense[]> {
+    const now = new Date().toISOString();
+    const created: Expense[] = inputs.map((input) => ({
+      ...input,
+      id: newId(),
+      createdAt: now,
+    }));
+    if (created.length === 0) return [];
+
+    // One round trip for the whole batch (transactional) rather than N inserts.
+    await this.client.batch(
+      created.map((e) => ({
+        sql: `INSERT INTO expenses
+                (id, user_id, amount_minor, currency, category, description, date, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          e.id,
+          e.userId,
+          e.amountMinor,
+          e.currency,
+          e.category,
+          e.description,
+          e.date,
+          e.createdAt,
+        ],
+      })),
+      "write",
+    );
+    return created;
+  }
+
   async getExpense(userId: string, id: string): Promise<Expense | null> {
     const r = await this.client.execute({
       sql: "SELECT * FROM expenses WHERE user_id = ? AND id = ?",
@@ -131,6 +164,11 @@ export class TursoStore implements ExpenseStore {
     if (filter.to) {
       clauses.push("date <= ?");
       args.push(filter.to);
+    }
+    if (filter.search) {
+      clauses.push("(lower(description) LIKE ? OR lower(category) LIKE ?)");
+      const like = `%${filter.search.trim().toLowerCase()}%`;
+      args.push(like, like);
     }
 
     // Newest first: date, then created_at, then rowid — rowid strictly

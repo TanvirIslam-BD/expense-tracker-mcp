@@ -7,12 +7,15 @@ import { MemoryStore } from "../src/store/memory.js";
 
 const TOOL_NAMES = [
   "add_expense",
+  "add_expenses",
   "list_expenses",
   "get_expense",
   "update_expense",
   "delete_expense",
   "summarize_expenses",
   "set_budget",
+  "list_budgets",
+  "delete_budget",
   "get_budget_status",
   "list_categories",
   "export_expenses",
@@ -117,6 +120,64 @@ describe("MCP server (in-memory transport)", () => {
 
     const ranged = await call(client, "list_expenses", { from: "2026-07-02", to: "2026-07-31" });
     expect(jsonOf(ranged).length).toBe(2);
+  });
+
+  it("add_expenses records a batch in one call", async () => {
+    const r = await call(client, "add_expenses", {
+      expenses: [
+        { amount: 10, category: "food", date: "2026-07-01" },
+        { amount: 20, category: "transport", date: "2026-07-02" },
+        { amount: 30, category: "food", description: "dinner", date: "2026-07-03" },
+      ],
+    });
+    expect(r.isError).toBeFalsy();
+    expect(jsonOf(r).length).toBe(3);
+    expect(jsonOf(await call(client, "list_expenses", {})).length).toBe(3);
+  });
+
+  it("add_expenses rejects the whole batch if any item is invalid", async () => {
+    expect(
+      await isToolError(client, "add_expenses", {
+        expenses: [
+          { amount: 10, category: "food" },
+          { amount: 5, category: "food", date: "2026-13-40" }, // invalid
+        ],
+      }),
+    ).toBe(true);
+    // Nothing partially written — validation happens before any insert.
+    expect(textOf(await call(client, "list_expenses", {}))).toContain("No expenses found");
+  });
+
+  it("searches by note/description or category (case-insensitive)", async () => {
+    await call(client, "add_expense", { amount: 4, category: "food", description: "Morning Latte", date: "2026-07-01" });
+    await call(client, "add_expense", { amount: 40, category: "transport", description: "taxi", date: "2026-07-02" });
+
+    const byNote = await call(client, "list_expenses", { search: "coffee" });
+    expect(textOf(byNote)).toContain("No expenses found"); // no 'coffee' note
+
+    const latte = await call(client, "list_expenses", { search: "latte" });
+    expect(jsonOf(latte).length).toBe(1);
+    expect(jsonOf(latte)[0].description).toBe("Morning Latte");
+
+    const byCat = await call(client, "list_expenses", { search: "TRANS" });
+    expect(jsonOf(byCat).length).toBe(1);
+  });
+
+  it("lists and deletes budgets", async () => {
+    await call(client, "set_budget", { amount: 300, category: "food" });
+    await call(client, "set_budget", { amount: 2000 }); // overall
+
+    const listed = jsonOf(await call(client, "list_budgets", {})) as any[];
+    expect(listed.length).toBe(2);
+    expect(listed.map((b) => b.scope).sort()).toEqual(["food", "overall"]);
+
+    const del = await call(client, "delete_budget", { category: "food" });
+    expect(textOf(del)).toContain("Deleted");
+    const after = jsonOf(await call(client, "list_budgets", {})) as any[];
+    expect(after.map((b) => b.scope)).toEqual(["overall"]);
+
+    // Deleting a non-existent budget errors.
+    expect(await isToolError(client, "delete_budget", { category: "nope" })).toBe(true);
   });
 
   it("summarizes spending grouped by category", async () => {

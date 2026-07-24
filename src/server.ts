@@ -7,6 +7,7 @@ import {
   isValidDate,
   isValidMonth,
   monthOf,
+  resolveCategory,
   toMajor,
   toMinor,
   todayISO,
@@ -61,10 +62,14 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     { name: "expense-tracker", version: "1.0.0" },
     {
       instructions:
-        "Personal expense tracker. Use add_expense to record spending, " +
-        "list_expenses/summarize_expenses to review it, and set_budget/" +
-        "get_budget_status to track monthly budgets. Amounts are in major " +
-        "currency units (e.g. 12.50). Dates are YYYY-MM-DD; months are YYYY-MM.",
+        "Personal expense tracker. Use add_expense (or add_expenses for many at " +
+        "once) to record spending, list_expenses/summarize_expenses to review " +
+        "it, and set_budget/get_budget_status to track monthly budgets. Amounts " +
+        "are in major currency units (e.g. 12.50). Dates are YYYY-MM-DD; months " +
+        "are YYYY-MM. IMPORTANT: when the user records an expense without naming " +
+        "a category, choose the most appropriate category yourself (e.g. food, " +
+        "transport, rent, utilities, entertainment, shopping, health) and pass " +
+        "it — never leave the category blank, so spending reports stay complete.",
     },
   );
 
@@ -81,7 +86,17 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "(e.g. 12.50). Date defaults to today.",
       inputSchema: {
         amount: z.number().positive().describe("Amount in major units, e.g. 12.50"),
-        category: z.string().min(1).describe("Category, e.g. food, transport, rent"),
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Category, e.g. food, transport, rent, utilities, entertainment, " +
+              "shopping, health. If the user didn't state a category, YOU should " +
+              "infer the most fitting one from the description/context and pass " +
+              "it here — don't leave it blank. (If it's still omitted, the server " +
+              "falls back to keyword inference, then 'uncategorized'.)",
+          ),
         description: z.string().default("").describe("Optional note"),
         date: z.string().optional().describe("Date YYYY-MM-DD; defaults to today"),
         currency: z
@@ -95,12 +110,13 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       const d = date ?? todayISO();
       if (!isValidDate(d)) return fail(`Invalid date "${d}". Use YYYY-MM-DD.`);
 
+      const note = description ?? "";
       const expense = await store.addExpense({
         userId,
         amountMinor: toMinor(amount),
         currency: (currency ?? DEFAULT_CURRENCY).toUpperCase(),
-        category: category.trim().toLowerCase(),
-        description: description ?? "",
+        category: resolveCategory(category, note),
+        description: note,
         date: d,
       });
 
@@ -113,24 +129,89 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
   );
 
   server.registerTool(
+    "add_expenses",
+    {
+      title: "Add multiple expenses",
+      description:
+        "Record several expenses in one call — efficient for a receipt with " +
+        "many line items or logging a whole day's spending at once. Each item " +
+        "takes the same fields as add_expense.",
+      inputSchema: {
+        expenses: z
+          .array(
+            z.object({
+              amount: z.number().positive().describe("Amount in major units"),
+              category: z
+                .string()
+                .min(1)
+                .optional()
+                .describe(
+                  "Category. If the user didn't state one, infer the most " +
+                    "fitting category yourself rather than leaving it blank.",
+                ),
+              description: z.string().default("").describe("Optional note"),
+              date: z.string().optional().describe("Date YYYY-MM-DD; defaults to today"),
+              currency: z.string().length(3).optional().describe("ISO-4217 code"),
+            }),
+          )
+          .min(1)
+          .max(100)
+          .describe("The expenses to add (1–100)"),
+      },
+    },
+    async ({ expenses }) => {
+      const today = todayISO();
+      const prepared = [];
+      for (let i = 0; i < expenses.length; i++) {
+        const e = expenses[i];
+        const d = e.date ?? today;
+        if (!isValidDate(d)) {
+          return fail(`Item ${i + 1}: invalid date "${d}". Use YYYY-MM-DD.`);
+        }
+        const note = e.description ?? "";
+        prepared.push({
+          userId,
+          amountMinor: toMinor(e.amount),
+          currency: (e.currency ?? DEFAULT_CURRENCY).toUpperCase(),
+          category: resolveCategory(e.category, note),
+          description: note,
+          date: d,
+        });
+      }
+
+      const created = await store.addExpenses(prepared);
+      const totals = totalsByCurrency(created);
+      return text(
+        `Added ${created.length} expense(s), total ${renderTotals(totals)}.\n\n` +
+          jsonBlock(created.map(view)),
+      );
+    },
+  );
+
+  server.registerTool(
     "list_expenses",
     {
       title: "List expenses",
       description:
-        "List expenses, newest first, with optional category and date-range " +
-        "filters.",
+        "List expenses, newest first, with optional category, date-range, and " +
+        "free-text filters. Use `search` to find expenses by a word in the " +
+        "note/description (e.g. \"coffee\") or category.",
       inputSchema: {
         category: z.string().optional().describe("Filter by category"),
+        search: z
+          .string()
+          .optional()
+          .describe("Case-insensitive text match on the note/description or category"),
         from: z.string().optional().describe("Start date YYYY-MM-DD (inclusive)"),
         to: z.string().optional().describe("End date YYYY-MM-DD (inclusive)"),
         limit: z.number().int().positive().max(500).default(50),
       },
     },
-    async ({ category, from, to, limit }) => {
+    async ({ category, search, from, to, limit }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);
       if (to && !isValidDate(to)) return fail(`Invalid "to" date: ${to}`);
 
-      const items = await store.listExpenses(userId, { category, from, to, limit });
+      const items = await store.listExpenses(userId, { category, search, from, to, limit });
       if (items.length === 0) return text("No expenses found for that filter.");
 
       const lines = items.map(
@@ -324,6 +405,61 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
   );
 
   server.registerTool(
+    "list_budgets",
+    {
+      title: "List budgets",
+      description:
+        "List all monthly budgets you've set — the overall budget and any " +
+        "per-category budgets.",
+      inputSchema: {},
+    },
+    async () => {
+      const budgets = await store.listBudgets(userId);
+      if (budgets.length === 0) {
+        return text("No budgets set. Use set_budget to create one.");
+      }
+      const lines = budgets.map(
+        (b) =>
+          `• ${(b.category ?? "overall").padEnd(14)} ` +
+          `${formatMoney(b.amountMinor, b.currency)} / month`,
+      );
+      const structured = budgets.map((b) => ({
+        scope: b.category ?? "overall",
+        amount: toMajor(b.amountMinor),
+        currency: b.currency,
+        period: b.period,
+      }));
+      return text(lines.join("\n") + "\n\n" + jsonBlock(structured));
+    },
+  );
+
+  server.registerTool(
+    "delete_budget",
+    {
+      title: "Delete budget",
+      description:
+        "Remove a monthly budget. Omit category to delete the overall budget; " +
+        "provide a category to delete that category's budget.",
+      inputSchema: {
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Category; omit for the overall budget"),
+      },
+    },
+    async ({ category }) => {
+      const target = category ? category.trim().toLowerCase() : null;
+      const budgets = await store.listBudgets(userId);
+      const found = budgets.find((b) => b.category === target);
+      const label = target ? `"${target}"` : "overall";
+      if (!found) return fail(`No ${label} budget to delete.`);
+      await store.deleteBudget(userId, found.id);
+      return text(`Deleted ${label} monthly budget.`);
+    },
+  );
+
+  server.registerTool(
     "get_budget_status",
     {
       title: "Get budget status",
@@ -346,9 +482,13 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         return text("No budgets set. Use set_budget to create one.");
       }
 
-      const monthExpenses = (await store.listExpenses(userId)).filter(
-        (e) => monthOf(e.date) === m,
-      );
+      // Scope to the month at the store level (uses the (user_id, date) index)
+      // rather than fetching every expense and filtering in memory. All valid
+      // days in month `m` sort within [`${m}-01`, `${m}-31`] lexicographically.
+      const monthExpenses = await store.listExpenses(userId, {
+        from: `${m}-01`,
+        to: `${m}-31`,
+      });
 
       const statuses = budgets.map((b) => {
         const relevant = monthExpenses.filter(
@@ -508,9 +648,11 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     },
     async (uri) => {
       const m = currentMonth();
-      const items = (await store.listExpenses(userId)).filter(
-        (e) => monthOf(e.date) === m,
-      );
+      // Month-scoped at the store level (indexed) — no full-table fetch.
+      const items = await store.listExpenses(userId, {
+        from: `${m}-01`,
+        to: `${m}-31`,
+      });
       const byCat: Record<string, Record<string, number>> = {};
       for (const e of items) {
         byCat[e.category] ??= {};

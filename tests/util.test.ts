@@ -10,6 +10,8 @@ import {
   isValidDate,
   isValidMonth,
   resolveUserId,
+  categorize,
+  resolveCategory,
   view,
 } from "../src/util.js";
 import type { Expense } from "../src/store/types.js";
@@ -111,6 +113,28 @@ describe("resolveUserId", () => {
     expect(resolveUserId(fakeReq({}))).toBe("solo");
     if (saved === undefined) delete process.env.DEFAULT_USER_ID;
     else process.env.DEFAULT_USER_ID = saved;
+  });
+});
+
+describe("categorize / resolveCategory", () => {
+  it("infers a category from keywords in the note", () => {
+    expect(categorize("Morning latte")).toBe("food");
+    expect(categorize("Uber to the airport")).toBe("transport");
+    expect(categorize("Monthly rent payment")).toBe("rent");
+    expect(categorize("Netflix subscription")).toBe("entertainment");
+    expect(categorize("Amazon order")).toBe("shopping");
+  });
+
+  it("falls back to 'uncategorized' when nothing matches or note is empty", () => {
+    expect(categorize("")).toBe("uncategorized");
+    expect(categorize(null)).toBe("uncategorized");
+    expect(categorize("qwerty zxcv")).toBe("uncategorized");
+  });
+
+  it("resolveCategory prefers an explicit category, else infers", () => {
+    expect(resolveCategory("Groceries", "latte")).toBe("groceries"); // explicit wins, normalised
+    expect(resolveCategory("  ", "uber ride")).toBe("transport"); // blank -> infer
+    expect(resolveCategory(undefined, "nothing here")).toBe("uncategorized");
   });
 });
 

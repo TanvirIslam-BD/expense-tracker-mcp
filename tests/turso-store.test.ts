@@ -71,6 +71,25 @@ describe("TursoStore — expenses", () => {
     expect((await store.listExpenses("alice", { limit: 1 })).length).toBe(1);
   });
 
+  it("searches description and category via SQL LIKE (case-insensitive)", async () => {
+    await store.addExpense(expense({ category: "food", description: "Morning Latte" }));
+    await store.addExpense(expense({ category: "transport", description: "taxi" }));
+
+    expect((await store.listExpenses("alice", { search: "latte" })).length).toBe(1);
+    expect((await store.listExpenses("alice", { search: "TRANS" })).length).toBe(1);
+    expect((await store.listExpenses("alice", { search: "coffee" })).length).toBe(0);
+  });
+
+  it("addExpenses inserts a batch in one round trip", async () => {
+    const created = await store.addExpenses([
+      expense({ description: "a" }),
+      expense({ description: "b", category: "transport" }),
+    ]);
+    expect(created.length).toBe(2);
+    expect((await store.listExpenses("alice")).length).toBe(2);
+    expect(await store.addExpenses([])).toEqual([]);
+  });
+
   it("updates only the provided fields", async () => {
     const e = await store.addExpense(expense({ amountMinor: 1000, category: "food" }));
     const updated = await store.updateExpense("alice", e.id, { amountMinor: 2500 });

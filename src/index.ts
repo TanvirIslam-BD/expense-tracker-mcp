@@ -100,13 +100,20 @@ async function startHttp(): Promise<void> {
         params?: { name?: string };
       };
       const method = body.method;
+      const label = `${method ?? "?"}${body.params?.name ? ` tool=${body.params.name}` : ""}`;
 
-      // TEMPORARY DIAGNOSTIC (remove after per-user isolation is confirmed on
-      // MCPize): logs resolved user id + the mcpize user id per request. Header
-      // values other than the (non-secret) user id are never logged.
+      // TEMPORARY DIAGNOSTIC (remove before production): logs the resolved user
+      // id per request plus end-to-end server latency (ms) once the response is
+      // sent. `ms=` is dominated by DB round trips, so it's the number to watch
+      // when comparing Turso regions. Header values other than the (non-secret)
+      // user id are never logged.
+      const started = Date.now();
       console.error(
-        `[req] method=${method ?? "?"}${body.params?.name ? ` tool=${body.params.name}` : ""} userId=${userId ?? "(none)"} mcpizeUserId=${req.header("x-mcpize-user-id") || "-"}`,
+        `[req] method=${label} userId=${userId ?? "(none)"} mcpizeUserId=${req.header("x-mcpize-user-id") || "-"}`,
       );
+      res.once("finish", () => {
+        console.error(`[req-done] method=${label} ms=${Date.now() - started}`);
+      });
 
       // Fail closed: methods that read or write a user's data require an
       // identified user. Without one we refuse rather than touch a shared

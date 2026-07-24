@@ -74,6 +74,18 @@ export class MemoryStore implements ExpenseStore {
     return expense;
   }
 
+  async addExpenses(inputs: NewExpense[]): Promise<Expense[]> {
+    const now = new Date().toISOString();
+    const created = inputs.map((input) => ({
+      ...input,
+      id: newId(),
+      createdAt: now,
+    }));
+    this.db.expenses.push(...created);
+    if (created.length > 0) this.persist();
+    return created;
+  }
+
   async getExpense(userId: string, id: string): Promise<Expense | null> {
     return (
       this.db.expenses.find((e) => e.userId === userId && e.id === id) ?? null
@@ -89,6 +101,14 @@ export class MemoryStore implements ExpenseStore {
     }
     if (filter.from) items = items.filter((e) => e.date >= filter.from!);
     if (filter.to) items = items.filter((e) => e.date <= filter.to!);
+    if (filter.search) {
+      const q = filter.search.trim().toLowerCase();
+      items = items.filter(
+        (e) =>
+          e.description.toLowerCase().includes(q) ||
+          e.category.toLowerCase().includes(q),
+      );
+    }
 
     // Newest first: by date, then createdAt, then insertion order. The index
     // tiebreaker keeps ordering deterministic even when two expenses share a
