@@ -14,8 +14,8 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
   <img src="./assets/screenshot-9-claude-light-receipt.png" alt="Logging an expense from a realistic receipt photo in Claude light mode" width="220">
 </p>
 <p align="center">
-  <img src="./assets/screenshot-3-desktop-log.png" alt="Logging expenses and summarizing by category" width="420">
-  <img src="./assets/screenshot-4-desktop-budget.png" alt="Budget status and category breakdown" width="420">
+  <img src="./assets/screenshot-10-chatgpt-desktop.png" alt="Spending report in the ChatGPT desktop app" width="420">
+  <img src="./assets/screenshot-11-claude-desktop.png" alt="Spending report in the Claude desktop app" width="420">
 </p>
 
 > Receipt photos are read by the host model's vision capability (Claude/ChatGPT) —
