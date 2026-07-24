@@ -156,13 +156,30 @@ in-memory `Map` does not survive it; a database does.
    (`libsql://<db>-<org>.turso.io`) and create/copy an **auth token**.
 3. Combine them into one value, since MCPize's free/hobby tier caps you at
    1 secret: `libsql://<db>-<org>.turso.io?authToken=<token>`
-4. Set that as `TURSO_DATABASE_URL` — locally in `.env`, and on MCPize as the
-   `TURSO_DATABASE_URL` secret declared in [`mcpize.yaml`](./mcpize.yaml).
+4. On **MCPize**, set that combined value as the `TURSO_DATABASE_URL` secret
+   (declared in [`mcpize.yaml`](./mcpize.yaml)) via the dashboard. MCPize
+   injects secrets straight into the process environment — nothing else needed.
 5. Redeploy. `TursoStore.init()` creates its tables automatically on first run
    (`CREATE TABLE IF NOT EXISTS`) — no separate migration step.
 
-For local dev without a network dependency, point `TURSO_DATABASE_URL` at a
-local file instead — same code path, zero setup: `TURSO_DATABASE_URL=file:./data/local.db`.
+**Running locally against a database.** The server reads `process.env`
+directly — it does *not* auto-load `.env`. Either export the var in your shell,
+or (Node ≥ 20.6) pass the file explicitly:
+
+```bash
+node --env-file=.env dist/index.js --http
+```
+
+For local dev without any network dependency, point `TURSO_DATABASE_URL` at a
+local SQLite file — same code path, zero setup:
+`TURSO_DATABASE_URL=file:./data/local.db`.
+
+> **Troubleshooting — `UND_ERR_CONNECT_TIMEOUT` connecting to Turso locally.**
+> On NAT64 / IPv6-transition networks (some ISPs and mobile networks), Node's
+> default IPv4-first connect can't reach Turso's endpoint and times out after
+> 10 s, even though the network is otherwise fine. Force IPv6 ordering:
+> `NODE_OPTIONS=--dns-result-order=ipv6first`. This is a local-network quirk
+> only — it does **not** affect the MCPize deployment.
 
 If you'd rather use a different backend (Postgres, Upstash Redis, etc.),
 implement `ExpenseStore` (`src/store/types.ts`) against it in a new file under
