@@ -35,10 +35,21 @@ startCommand:
 #       env: EXPENSE_USER_TOKEN
 #     credentials_mode: per_user
 #
-# --- Optional: publisher secrets (your own infra keys) -----------------------
-# secrets:
-#   - name: DATABASE_URL
-#     required: false
-#     description: Postgres connection string for durable storage.
-#
+# --- Publisher secrets (your own infra keys) ---------------------------------
+# Without TURSO_DATABASE_URL, the server falls back to an in-memory store that
+# is wiped every time MCPize recycles the instance ("scale to zero" on the
+# free/hobby tier, or load-balancing across concurrent instances on any tier).
+# Set this to get durable storage that survives restarts. See README's
+# "Storage & persistence" section for how to create a free Turso database.
+secrets:
+  - name: TURSO_DATABASE_URL
+    required: false
+    description: |
+      libSQL/Turso connection URL, e.g. libsql://<db>-<org>.turso.io. On plans
+      limited to 1 secret, embed the auth token as a query param instead of
+      using a second secret: libsql://<db>-<org>.turso.io?authToken=<token>
+  # - name: TURSO_AUTH_TOKEN
+  #   required: false
+  #   description: Only needed if not embedding the token in TURSO_DATABASE_URL.
+
 # Note: pricing tiers are configured in the MCPize Dashboard, not in this file.

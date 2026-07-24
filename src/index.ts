@@ -3,9 +3,47 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { buildServer } from "./server.js";
 import { MemoryStore } from "./store/memory.js";
+import { TursoStore } from "./store/turso.js";
+import type { ExpenseStore } from "./store/types.js";
 import { resolveUserId } from "./util.js";
 
-const store = new MemoryStore(process.env.DATA_DIR);
+/**
+ * TURSO_DATABASE_URL may embed its auth token as a query param
+ * (`libsql://xxx.turso.io?authToken=...`), which lets a single secret cover a
+ * remote Turso database on hosts (like MCPize's free tier) that cap you at
+ * one secret. A separate TURSO_AUTH_TOKEN env var is also honored, so a
+ * two-secret setup works too — the embedded token wins if both are present.
+ */
+function resolveTursoConfig(): { url: string; authToken?: string } | null {
+  const raw = process.env.TURSO_DATABASE_URL;
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    const embeddedToken = parsed.searchParams.get("authToken");
+    if (embeddedToken) {
+      parsed.searchParams.delete("authToken");
+      return { url: parsed.toString(), authToken: embeddedToken };
+    }
+  } catch {
+    // Not a parseable URL (e.g. a local `file:./data.db` path) — use as-is.
+  }
+  return { url: raw, authToken: process.env.TURSO_AUTH_TOKEN };
+}
+
+function createStore(): ExpenseStore {
+  const turso = resolveTursoConfig();
+  if (turso) {
+    console.error(`[store] using TursoStore (${turso.url.replace(/\?.*/, "")})`);
+    return new TursoStore(turso.url, turso.authToken);
+  }
+  console.error(
+    "[store] using MemoryStore — data will NOT survive a restart or a second " +
+      "instance. Set TURSO_DATABASE_URL for durable storage in production.",
+  );
+  return new MemoryStore(process.env.DATA_DIR);
+}
+
+const store = createStore();
 await store.init();
 
 // Transport selection:

@@ -24,7 +24,7 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
 
 - **SDK:** official `@modelcontextprotocol/sdk` (v1.29+), schemas validated with `zod`
 - **Transport:** dual — **stdio** for local dev / MCP Inspector, **Streamable HTTP** (stateless) for hosted deployment
-- **Storage:** pluggable `ExpenseStore` interface; ships with a dependency-free in-memory store (optional JSON persistence)
+- **Storage:** pluggable `ExpenseStore` interface — in-memory by default, or a durable libSQL/Turso-backed store (see "Storage & persistence" below; **required** for hosted use)
 - **Money:** stored as integer minor units (no floating-point drift), ISO-4217 currency per record
 
 ---
@@ -101,7 +101,9 @@ Copy `.env.example` to `.env`. All variables are optional:
 | `MCP_TRANSPORT` | auto | `http` or `stdio`. If unset, HTTP when `PORT` is present, else stdio. |
 | `PORT` | `8080` | HTTP port (set automatically by MCPize / Cloud Run). |
 | `DEFAULT_CURRENCY` | `USD` | ISO-4217 code used when an expense omits a currency. |
-| `DATA_DIR` | — | If set, expenses persist to `DATA_DIR/expenses.json`. Otherwise in-memory. |
+| `TURSO_DATABASE_URL` | — | libSQL/Turso connection URL. If set, storage is durable (survives restarts). **Set this for any hosted deployment.** |
+| `TURSO_AUTH_TOKEN` | — | Auth token, if not embedded in `TURSO_DATABASE_URL` as `?authToken=...`. |
+| `DATA_DIR` | — | Fallback in-memory store's JSON persistence dir. Ignored if `TURSO_DATABASE_URL` is set. |
 | `DEFAULT_USER_ID` | `local` (stdio) / `public` (http) | Fallback id for unauthenticated requests. |
 
 ---
@@ -117,15 +119,55 @@ see each other's expenses. In stdio mode there is a single local user.
 
 ## Storage & persistence
 
-The default `MemoryStore` is dependency-free and builds anywhere. With `DATA_DIR`
-set it persists to a JSON file; otherwise data lives in memory.
+There are two `ExpenseStore` implementations. `src/index.ts` picks one
+automatically: `TursoStore` if `TURSO_DATABASE_URL` is set, otherwise
+`MemoryStore`.
 
-> **Production note:** MCPize hosts servers on Cloud Run, whose filesystem is
-> ephemeral and per-instance. For durable, multi-instance storage, implement the
-> `ExpenseStore` interface (`src/store/types.ts`) against a real database
-> (Postgres, Turso, etc.) and construct it in `src/index.ts` instead of
-> `MemoryStore`. The MCP tool layer is storage-agnostic and needs no changes —
-> add the connection string as a publisher secret (`DATABASE_URL`) in `mcpize.yaml`.
+- **`MemoryStore`** (`src/store/memory.ts`) — dependency-free, in-process. Data
+  lives in RAM and optionally mirrors to a JSON file if `DATA_DIR` is set.
+  Fine for local dev. **Do not rely on this for a hosted deployment** — see below.
+- **`TursoStore`** (`src/store/turso.ts`) — a real SQLite/libSQL database, used
+  whenever `TURSO_DATABASE_URL` is set. Survives restarts and is shared across
+  concurrent instances, because the data lives outside the process.
+
+### Why this matters: the scale-to-zero bug
+
+If you test this server on MCPize's hosted playground with only `MemoryStore`
+configured, you will hit this exact sequence:
+
+1. `add_expense` a few times — the tool confirms each one correctly.
+2. Wait a bit (reading the response, thinking of your next message).
+3. Ask `"How much have I spent this month?"` — the server reports **zero
+   expenses**, and may then re-add the same expenses from its own
+   conversation memory, silently creating duplicates.
+
+This is not a tool-calling bug — it's `MemoryStore`'s in-process RAM getting
+wiped. MCPize's hosting (Cloud Run under the hood) **scales idle instances to
+zero** to save cost — advertised explicitly in their FAQ. Every request can
+also land on a different concurrent instance under load. Either way, a plain
+in-memory `Map` does not survive it; a database does.
+
+### Setting up durable storage (Turso)
+
+1. Create a free database at [turso.tech](https://turso.tech) (sign up, then
+   "Create Database" from the dashboard — pick a region close to your MCPize
+   deploy region).
+2. From the database's dashboard, copy the **connection URL**
+   (`libsql://<db>-<org>.turso.io`) and create/copy an **auth token**.
+3. Combine them into one value, since MCPize's free/hobby tier caps you at
+   1 secret: `libsql://<db>-<org>.turso.io?authToken=<token>`
+4. Set that as `TURSO_DATABASE_URL` — locally in `.env`, and on MCPize as the
+   `TURSO_DATABASE_URL` secret declared in [`mcpize.yaml`](./mcpize.yaml).
+5. Redeploy. `TursoStore.init()` creates its tables automatically on first run
+   (`CREATE TABLE IF NOT EXISTS`) — no separate migration step.
+
+For local dev without a network dependency, point `TURSO_DATABASE_URL` at a
+local file instead — same code path, zero setup: `TURSO_DATABASE_URL=file:./data/local.db`.
+
+If you'd rather use a different backend (Postgres, Upstash Redis, etc.),
+implement `ExpenseStore` (`src/store/types.ts`) against it in a new file under
+`src/store/` and construct it in `createStore()` in `src/index.ts` — the MCP
+tool layer (`server.ts`) is storage-agnostic and needs no changes either way.
 
 ---
 
@@ -186,19 +228,21 @@ re-deriving decisions or re-discovering bugs that were already found and fixed.
 ### Current state, precisely
 
 - **Git**: single repo, `main` branch only, pushed to
-  `https://github.com/TanvirIslam-BD/expense-tracker-mcp.git`. 4 commits:
-  initial implementation → license → marketplace assets → one extra screenshot.
-  No open branches, no PRs, no CI configured.
+  `https://github.com/TanvirIslam-BD/expense-tracker-mcp.git`. No open
+  branches, no PRs, no CI configured. Run `git log --oneline` for the current
+  commit list rather than trusting a count written here — it goes stale
+  immediately.
 - **Build**: `npm run build` compiles clean with `tsc` (strict mode, no `any`
   leaks). Verified working on Node v22.23.1 / npm 10.9.8 on Windows.
-- **Tests**: 33 tests across 3 files, all passing, ~93% statement coverage
+- **Tests**: 44 tests across 4 files, all passing, ~94% statement coverage
   (`npm run test:coverage`). `src/index.ts` and `src/store/types.ts` are
   excluded from coverage (process bootstrap and interfaces-only, respectively).
 - **Dependency versions actually installed** (see `package-lock.json` for
   exact resolutions): `@modelcontextprotocol/sdk@1.29.0`, `zod@3.25.76`,
-  `express@4.22.2`, `vitest@2.1.9`. `package.json` version ranges are looser
-  (`^1.12.0` etc.) — if you bump these, re-run the full test suite, since the
-  SDK has changed method signatures between minor versions before.
+  `express@4.22.2`, `vitest@2.1.9`, `@libsql/client@0.14.0`. `package.json`
+  version ranges are looser (`^1.12.0` etc.) — if you bump these, re-run the
+  full test suite, since the SDK has changed method signatures between minor
+  versions before.
 - **Locally installed for real use**: registered in Claude Desktop's
   `claude_desktop_config.json` (stdio transport, `DATA_DIR` pointed at
   `D:/mcp_tracker_exp/data`) alongside a pre-existing `webcommander-local`
@@ -246,22 +290,28 @@ re-deriving decisions or re-discovering bugs that were already found and fixed.
   All arithmetic in `src/server.ts` happens in minor units; conversion to
   major units happens only at the tool-result boundary (`view()` in `util.ts`).
 - **Storage behind an interface** (`ExpenseStore` in `src/store/types.ts`):
-  the only implementation today is `MemoryStore` (`src/store/memory.ts`), which
-  is deliberately dependency-free (no DB driver) so the project builds and
-  tests anywhere with zero setup. It optionally persists to a single JSON file
-  under `DATA_DIR` with writes serialized through a promise chain
-  (`writeChain` in `memory.ts`) to avoid corrupting the file under concurrent
-  mutation. **This will not survive Cloud Run's ephemeral, per-instance
-  filesystem in production** — see the "Storage & persistence" section above.
-  If you're asked to add real persistence, implement `ExpenseStore` against
-  Postgres/Turso/etc. in a new file under `src/store/`, wire it up in
-  `src/index.ts`, and the tool layer (`server.ts`) needs zero changes — that's
-  the point of the interface boundary.
+  two implementations exist. `MemoryStore` (`src/store/memory.ts`) is
+  dependency-free (no DB driver) so the project builds and tests anywhere with
+  zero setup, optionally persisting to a single JSON file under `DATA_DIR`
+  with writes serialized through a promise chain (`writeChain`) to avoid
+  corrupting the file under concurrent mutation — but it **does not survive a
+  process restart**, which is fatal on serverless hosting (see the bug entry
+  below). `TursoStore` (`src/store/turso.ts`) is the production answer: a real
+  SQLite/libSQL database, selected automatically in `src/index.ts` whenever
+  `TURSO_DATABASE_URL` is set. It's built against `@libsql/client`, which
+  speaks the same protocol whether pointed at a local file (`file:./x.db`,
+  used in tests — zero network calls) or a remote Turso database — so the
+  exact same code and tests exercise both. If you need a different backend
+  (Postgres, Redis, etc.), implement `ExpenseStore` in a new file under
+  `src/store/` and wire it into `createStore()` in `src/index.ts` — the tool
+  layer (`server.ts`) needs zero changes either way; that's the point of the
+  interface boundary.
 
-### Bugs found and fixed while writing the test suite (don't reintroduce these)
+### Bugs found and fixed (don't reintroduce these)
 
-Both were caught by tests that initially failed, then confirmed as real bugs
-(not bad test expectations) and fixed in source:
+The first two were caught by tests that initially failed, confirmed as real
+bugs (not bad test expectations), and fixed in source. The third was caught
+live on MCPize's hosted playground, not by a test — see the note after it.
 
 1. **`isValidDate` accepted impossible calendar dates.** `Date.parse` silently
    rolls `"2026-02-30"` into March 2 instead of rejecting it. Fixed in
@@ -273,11 +323,29 @@ Both were caught by tests that initially failed, then confirmed as real bugs
    (insertion order leaked through inconsistently). Fixed by adding an
    explicit insertion-index tiebreaker so "newest first" is deterministic even
    under same-millisecond writes.
+3. **`MemoryStore` data vanished between messages on the hosted playground.**
+   Reported symptom: after successfully adding several expenses, asking "how
+   much have I spent this month?" a message or two later got back "no
+   expenses recorded" — and the model then re-added the same expenses from its
+   own conversation memory, silently duplicating them on every subsequent
+   occurrence. Root cause: MCPize's hosting scales idle instances to zero
+   (confirmed in their FAQ) and can route concurrent requests to more than one
+   instance; `MemoryStore` is a plain in-process object, so any instance
+   recycle or multi-instance routing wipes/fragments it. This is not a race
+   condition or a flaky edge case — it is guaranteed to happen after any idle
+   gap long enough for scale-to-zero to trigger. Fixed by adding `TursoStore`
+   (real database, outside the process) and making it the one that gets used
+   whenever `TURSO_DATABASE_URL` is configured. `MemoryStore` itself is
+   unchanged and still correct for what it's for — local dev — the bug was
+   using it in a context (hosted, multi-instance) it was never meant for.
 
 If you touch date validation or expense ordering again, re-run
 `tests/util.test.ts` and `tests/store.test.ts` specifically — they pin down
-both of these with explicit cases (`"2026-02-30"` and the four-expense
-same-date ordering test).
+both of the first two with explicit cases (`"2026-02-30"` and the
+four-expense same-date ordering test). For storage/restart behavior, see
+`tests/turso-store.test.ts`'s "persistence across restarts" case, which
+opens a fresh `TursoStore` against the same file to simulate exactly what a
+Cloud Run instance recycle does.
 
 ### Testing approach — why an in-memory MCP client, not mocks
 
@@ -316,8 +384,11 @@ Roughly in likely order of relevance, not commitment:
 
 - **Confirm the MCPize deploy actually succeeded** and hits `/health`; the
   dashboard is the source of truth, not this document.
-- **Durable storage** — implement a Postgres/Turso-backed `ExpenseStore` for
-  production use on Cloud Run (see "Storage & persistence" above).
+- **Set `TURSO_DATABASE_URL` on the actual MCPize deployment** — implementing
+  and testing `TursoStore` locally (done, see bug #3 above) is not the same as
+  it being configured on the live hosted instance. Until that secret is set on
+  MCPize, the hosted server is still running on `MemoryStore` and will still
+  lose data on scale-to-zero.
 - **CI** — no GitHub Actions workflow exists yet; `npm ci && npm run build &&
   npm test` on push/PR would catch regressions before they reach main.
 - **x402 pay-per-call pricing** or subscription tiers — mentioned as a
