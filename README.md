@@ -11,7 +11,7 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
   <img src="./assets/screenshot-2-claude-mobile.png" alt="Spending report in Claude mobile" width="220">
   <img src="./assets/screenshot-7-chatgpt-light-add.png" alt="Adding an expense by natural-language prompt in ChatGPT light mode" width="220">
   <img src="./assets/screenshot-8-chatgpt-light-receipt.png" alt="Logging an expense from a realistic receipt photo in ChatGPT light mode" width="220">
-  <img src="./assets/screenshot-6-claude-receipt.png" alt="Logging an expense from a receipt photo in Claude" width="220">
+  <img src="./assets/screenshot-9-claude-light-receipt.png" alt="Logging an expense from a realistic receipt photo in Claude light mode" width="220">
 </p>
 <p align="center">
   <img src="./assets/screenshot-3-desktop-log.png" alt="Logging expenses and summarizing by category" width="420">
