@@ -154,4 +154,6 @@ vitest.config.ts    # test + coverage config
 
 ## License
 
-MIT
+This repository is provided for **reading and study purposes only** — see
+[LICENSE](./LICENSE). Running, deploying, or commercial use of the Software
+is not permitted under this license.
