@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Expense Tracker MCP — Marketing kit</title>
+<style>
+  :root{
+    --ink:#1a1a18; --ink2:#3d3d3a; --muted:#8a8a83; --line:#ecece7;
+    --surface:#f7f6f3; --bg:#ffffff;
+    --good:#4a9d6a; --warn:#e0a52e; --bad:#d8674f; --bar:#4a7fd6; --bar-top:#2f62b8;
+  }
+  /* brand tokens */
+  .claude{ --accent:#cc7a52; --model:"Sonnet 5"; }
+  .chatgpt{ --accent:#10a37f; --model:"GPT-5"; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#e7e2d9;
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);}
+  .page{padding:34px;display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start;}
+  .shot{display:flex;flex-direction:column;gap:10px;}
+  .shot .cap{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6b6b64;}
+
+  /* ---------- phone frame ---------- */
+  .frame{width:398px;background:#0f0f0e;border-radius:46px;padding:5px;
+    box-shadow:0 2px 4px rgba(40,30,20,.25),0 22px 50px -18px rgba(60,44,28,.5),inset 0 0 0 2px #2c2c29;}
+  .phone{width:388px;background:var(--bg);border-radius:41px;overflow:hidden;display:flex;flex-direction:column;min-height:812px;position:relative;}
+  .notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:118px;height:26px;background:#0f0f0e;border-radius:0 0 16px 16px;}
+  .status{display:flex;justify-content:space-between;align-items:center;padding:12px 26px 2px;font-size:14px;font-weight:600;}
+  .status .g{display:flex;gap:6px;align-items:center;font-size:12px;}
+  .batt{width:22px;height:11px;border:1.4px solid var(--ink);border-radius:3px;position:relative;opacity:.9;background:linear-gradient(90deg,var(--ink) 0 80%,transparent 80%);background-clip:content-box;padding:1px;}
+  .batt::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:5px;background:var(--ink);border-radius:0 1px 1px 0;}
+  .hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 10px;border-bottom:1px solid var(--line);}
+  .hdr .t{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;letter-spacing:-.01em;}
+  .hdr .caret{color:var(--muted);font-size:12px;}
+  .logo{width:24px;height:24px;flex:0 0 24px;border-radius:50%;display:grid;place-items:center;}
+  .logo svg{width:24px;height:24px;}
+  .share{background:#1a1a18;color:#fff;font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;}
+  .conv{padding:14px 16px 0;flex:1;}
+  .home{width:134px;height:5px;border-radius:3px;background:#1a1a18;opacity:.85;margin:8px auto;}
+
+  .urow{display:flex;justify-content:flex-end;margin:6px 0;}
+  .ubub{background:#f0efe9;padding:10px 15px;border-radius:18px 18px 6px 18px;font-size:15.5px;max-width:80%;}
+  .stamp{display:flex;justify-content:flex-end;gap:10px;color:var(--muted);font-size:12px;margin:2px 2px 14px;}
+  .arow{display:flex;gap:10px;margin:4px 0 6px;}
+  .abub{flex:1;}
+  .thinking{color:var(--muted);font-size:14px;margin:2px 0 14px;display:flex;gap:8px;align-items:center;}
+  .thinking::before{content:"";width:14px;height:14px;border-radius:50%;border:1.5px solid #d9d4cc;border-top-color:var(--accent);}
+
+  .toolcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:9px 13px;margin-bottom:12px;}
+  .toolcard .n{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;}
+  .toolcard .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);}
+  .toolcard .m{color:var(--muted);font-size:12px;margin-top:2px;margin-left:16px;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .say{font-size:15.5px;margin:2px 0 12px;line-height:1.45;}
+
+  .result{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 1px 3px rgba(60,44,28,.05);margin-bottom:14px;}
+  .added{display:flex;gap:12px;align-items:flex-start;}
+  .check{width:34px;height:34px;border-radius:50%;background:var(--good);display:grid;place-items:center;flex:0 0 34px;color:#fff;font-size:18px;}
+  .added .k{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+  .added .amt{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:2px 0;}
+  .added .meta{color:var(--ink2);font-size:14px;}
+  .result .foot{border-top:1px solid var(--line);margin-top:12px;padding-top:10px;color:var(--muted);font-size:13px;}
+
+  /* stat tiles + chart */
+  .tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+  .tile{background:linear-gradient(180deg,#fbfaf7,var(--surface));border:1px solid var(--line);border-radius:12px;padding:11px 12px;box-shadow:0 1px 2px rgba(60,44,28,.04);}
+  .tile .k{color:var(--muted);font-size:11.5px;font-weight:500;margin-bottom:5px;}
+  .tile .v{font-size:20px;font-weight:700;letter-spacing:-.02em;}
+  .tile .v.s{font-size:16px;}
+  .card{background:linear-gradient(180deg,#fcfbf8,var(--surface));border:1px solid var(--line);border-radius:14px;padding:14px 14px 10px;margin-bottom:14px;box-shadow:0 1px 3px rgba(60,44,28,.05);}
+  .card h3{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--ink2);}
+  .chart{display:grid;grid-template-columns:70px 1fr 50px;row-gap:9px;align-items:center;}
+  .cat{font-size:12px;color:var(--ink2);text-align:right;padding-right:10px;white-space:nowrap;}
+  .track{height:15px;}
+  .b{height:15px;border-radius:3px;min-width:3px;background:linear-gradient(90deg,#5f8fdd,var(--bar));box-shadow:0 1px 2px rgba(47,98,184,.22);}
+  .b.top{background:linear-gradient(90deg,#3f70c6,var(--bar-top));}
+  .val{font-size:10.5px;color:var(--ink2);font-weight:600;text-align:right;white-space:nowrap;}
+
+  /* budget rows */
+  .brow{margin-bottom:15px;}
+  .brow .top{display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600;}
+  .brow .track2{height:9px;border-radius:5px;background:#eceae4;margin:7px 0 5px;overflow:hidden;}
+  .brow .fill{height:9px;border-radius:5px;}
+  .brow .sub{font-size:12.5px;color:var(--muted);}
+  .over{background:#f3ddd6;color:#b34a2f;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;margin-left:8px;letter-spacing:.04em;}
+
+  .composer{padding:10px 14px 8px;border-top:1px solid var(--line);}
+  .cbox{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:12px 14px;}
+  .cbox .ph{color:var(--muted);font-size:15px;margin-bottom:12px;}
+  .cctl{display:flex;align-items:center;gap:12px;color:var(--ink2);}
+  .cplus{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;font-size:18px;}
+  .cmodel::after{content:var(--model);font-weight:600;font-size:14px;}
+  .cspace{flex:1;}
+  .disc{text-align:center;color:var(--accent);font-size:11.5px;margin:8px 0 2px;opacity:.85;}
+
+  /* receipt thumb */
+  .rcpt{display:flex;gap:12px;background:#f0efe9;border-radius:16px;padding:12px;margin:6px 0 4px;}
+  .paper{width:118px;background:#fbfbf8;border:1px solid #e6e2d8;border-radius:3px;padding:9px 8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:7.3px;line-height:1.5;color:#333;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+  .paper .c{text-align:center;}
+  .paper .li{display:flex;justify-content:space-between;}
+  .paper hr{border:none;border-top:1px dashed #c9c4b8;margin:4px 0;}
+  .rcpt .fi{align-self:flex-start;padding-top:4px;}
+  .rcpt .fi .fn{font-size:16px;font-weight:600;}
+  .rcpt .fi .fs{color:var(--muted);font-size:13px;}
+  .rmsg{font-size:15.5px;padding:0 2px 2px;}
+
+  /* ---------- desktop frame ---------- */
+  .browser{width:1180px;border-radius:14px;overflow:hidden;box-shadow:0 30px 70px -24px rgba(50,36,22,.55);border:1px solid #d7d2c7;background:#fff;}
+  .bbar{height:42px;background:#eceae4;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid #ddd8cd;}
+  .bdot{width:12px;height:12px;border-radius:50%;}
+  .burl{flex:1;margin:0 14px;background:#fff;border:1px solid #ddd8cd;border-radius:8px;height:26px;display:flex;align-items:center;padding:0 12px;font-size:12.5px;color:var(--muted);}
+  .dwrap{display:grid;grid-template-columns:270px 1fr;min-height:660px;}
+  .side{background:#f7f6f3;border-right:1px solid var(--line);padding:18px 16px;}
+  .side .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;margin-bottom:20px;}
+  .side .nav{display:flex;flex-direction:column;gap:3px;}
+  .side .nav a{padding:9px 11px;border-radius:9px;font-size:14px;color:var(--ink2);display:flex;gap:10px;align-items:center;}
+  .side .nav a.on{background:#ece7df;font-weight:600;color:var(--ink);}
+  .main{padding:26px 30px;}
+  .main h1{font-size:22px;margin:0 0 3px;letter-spacing:-.02em;}
+  .main .subtle{color:var(--muted);font-size:13.5px;margin-bottom:22px;}
+  .drow{display:grid;grid-template-columns:1.3fr 1fr;gap:22px;}
+  .panel{border:1px solid var(--line);border-radius:14px;padding:18px;background:#fff;box-shadow:0 1px 3px rgba(60,44,28,.04);}
+  .panel h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 16px;}
+  .led{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;}
+  .led:last-child{border-bottom:none;}
+  .led .l{display:flex;align-items:center;gap:10px;}
+  .led .cdot{width:9px;height:9px;border-radius:50%;}
+  .led .amt{font-weight:700;}
+  .totrow{display:flex;justify-content:space-between;font-size:17px;font-weight:800;padding-top:14px;margin-top:4px;border-top:2px solid var(--line);}
+  .kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:22px;}
+  .kpi{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:linear-gradient(180deg,#fcfbf8,var(--surface));}
+  .kpi .k{color:var(--muted);font-size:12px;margin-bottom:6px;}
+  .kpi .v{font-size:24px;font-weight:800;letter-spacing:-.02em;}
+</style>
+</head>
+<body>
+<div class="page" id="page"></div>
+
+<script>
+/* ---------------- brand + component helpers ---------------- */
+const STAR = '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#cc7a52"/><path fill="#fff" d="M20 7l2.6 8.9L31 12l-6 6.7 8.6 2.9-8.9 1.1 4.2 8.1-7-5.6-2.9 8.8-2.9-8.8-7 5.6 4.2-8.1L6 21.6l8.6-2.9-6-6.7 8.4 3.9z"/></svg>';
+const GPT  = '<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#000"/><path fill="#fff" d="M27.5 17.9a5 5 0 0 0-.43-4.1 5.05 5.05 0 0 0-5.44-2.42 5 5 0 0 0-8.47 1.8 5 5 0 0 0-3.34 2.42 5.05 5.05 0 0 0 .62 5.92 5 5 0 0 0 .43 4.1 5.05 5.05 0 0 0 5.44 2.42 5 5 0 0 0 8.47-1.8 5 5 0 0 0 3.34-2.42 5.05 5.05 0 0 0-.62-5.92zm-7.09 9.92a3.74 3.74 0 0 1-2.4-.87l3.32-1.92a.54.54 0 0 0 .27-.47v-4.68l1.4.81v3.88a3.76 3.76 0 0 1-2.59 3.25zM13 24.32a3.74 3.74 0 0 1-.45-2.52l3.32 1.92a.54.54 0 0 0 .54 0l4.05-2.34v1.62l-3.37 1.95A3.76 3.76 0 0 1 13 24.32zm-.87-7.2a3.74 3.74 0 0 1 1.95-1.64v4.75a.54.54 0 0 0 .27.47l4.05 2.34-1.4.81-3.37-1.95a3.76 3.76 0 0 1-1.5-4.78zm11.6 2.7l-4.05-2.34 1.4-.81 3.37 1.95a3.75 3.75 0 0 1-.58 6.77v-4.75a.54.54 0 0 0-.14-.82zm1.39-2.1l-3.32-1.92a.54.54 0 0 0-.54 0l-4.05 2.34v-1.62l3.37-1.95a3.75 3.75 0 0 1 5.56 3.15 3.7 3.7 0 0 1-1.02.02zM16.6 21.1l-1.4-.81v-3.88a3.75 3.75 0 0 1 6.15-2.88l-3.32 1.92a.54.54 0 0 0-.27.47zm.76-1.64L20 17.94l1.85 1.07v2.13L20 22.21l-1.85-1.07z"/></svg>';
+
+const BRANDS = {
+  claude:  { cls:'claude',  name:'Claude',  logo:STAR, reply:'Reply to Claude…',
+             disc:'Claude is AI and can make mistakes. Please double-check responses.' },
+  chatgpt: { cls:'chatgpt', name:'ChatGPT', logo:GPT,  reply:'Message ChatGPT…',
+             disc:'ChatGPT can make mistakes. Check important info.' },
+};
+
+function statusBar(){ return `<div class="status"><span>9:41</span><span class="batt"></span></div>`; }
+function header(b){ return `<div class="hdr"><div class="t"><span class="logo">${b.logo}</span>${b.name} <span class="caret">▾</span></div><span class="share">Share</span></div>`; }
+function composer(b){ return `<div class="composer"><div class="cbox"><div class="ph">${b.reply}</div><div class="cctl"><span class="cplus">+</span><span class="cspace"></span><span class="cmodel"></span><span style="color:var(--muted);font-size:14px">Medium ▾</span><span style="color:var(--muted)">🎙</span></div></div><div class="disc">${b.disc}</div></div>`; }
+function phone(b,inner){ return `<div class="frame ${b.cls}"><div class="phone"><div class="notch"></div>${statusBar()}${header(b)}<div class="conv">${inner}</div>${composer(b)}<div class="home"></div></div></div>`; }
+function toolcard(){ return `<div class="toolcard"><div class="n"><span class="dot"></span>expense-tracker MCP</div><div class="m">add_expense</div></div>`; }
+
+/* ---------------- mobile scenarios ---------------- */
+function addShot(b){
+  return phone(b, `
+    <div class="urow"><div class="ubub">I spent 45 on groceries today</div></div>
+    <div class="stamp"><span>9:41 AM</span></div>
+    ${toolcard()}
+    <div class="say">Logged it for you 👇</div>
+    <div class="result"><div class="added">
+      <div class="check">✓</div>
+      <div><div class="k">Expense added</div><div class="amt">$45.00</div>
+      <div class="meta">Groceries · Jul 25, 2026</div></div>
+    </div><div class="foot">Category inferred automatically — nothing left uncategorized.</div></div>
+  `);
+}
+function receiptShot(b){
+  const paper = `<div class="paper">
+    <div class="c"><b>GREEN VALLEY MARKET</b></div>
+    <div class="c">482 Elm Street, Springfield</div><hr>
+    <div>07/24/2026 2:41 PM</div><hr>
+    <div class="li"><span>Organic Bananas</span><span>3.48</span></div>
+    <div class="li"><span>Whole Milk 1 Gal</span><span>4.29</span></div>
+    <div class="li"><span>Sourdough Bread</span><span>5.99</span></div>
+    <div class="li"><span>Free Range Eggs</span><span>6.49</span></div>
+    <div class="li"><span>Baby Spinach</span><span>3.99</span></div>
+    <div class="li"><span>Roma Tomatoes</span><span>2.18</span></div>
+    <div class="li"><span>Coffee Beans</span><span>9.49</span></div><hr>
+    <div class="li"><span>Subtotal</span><span>35.91</span></div>
+    <div class="li"><span>Sales Tax 7%</span><span>2.51</span></div>
+    <div class="li"><b>TOTAL</b><b>$38.42</b></div>
+  </div>`;
+  return phone(b, `
+    <div class="rcpt">${paper}<div class="fi"><div class="fn">Receipt.jpg</div><div class="fs">1.8 MB</div></div></div>
+    <div class="urow" style="margin-top:2px"><div class="ubub">Log this receipt for me</div></div>
+    <div class="stamp"><span>9:41 AM</span></div>
+    ${toolcard()}
+    <div class="say">Got it — I read the receipt and logged it:</div>
+    <div class="result"><div class="added">
+      <div class="check">✓</div>
+      <div><div class="k">Expense added</div><div class="amt">$38.42</div>
+      <div class="meta">Groceries · Green Valley Market · Jul 24</div></div>
+    </div><div class="foot">Extracted from photo — vendor, total, and date auto-filled.</div></div>
+  `);
+}
+function budgetShot(b){
+  const row=(name,spent,limit,pct,color,over)=>`<div class="brow"><div class="top"><span>${name}${over?'<span class="over">OVER</span>':''}</span><span>$${spent} / $${limit}</span></div><div class="track2"><div class="fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div><div class="sub">${pct}% used · $${over?'0.00':limit-spent} left</div></div>`;
+  return phone(b, `
+    <div class="urow"><div class="ubub">How am I doing on my budgets this month?</div></div>
+    <div class="stamp"><span>9:41 AM</span></div>
+    <div class="toolcard"><div class="n"><span class="dot"></span>expense-tracker MCP</div><div class="m">get_budget_status</div></div>
+    <div class="say">Here's your July budget status:</div>
+    <div class="card" style="padding:16px 16px 6px">
+      <h3>Budget status · July 2026</h3>
+      ${row('Rent',1200,1200,100,'linear-gradient(90deg,#e57a5f,#d8674f)',true)}
+      ${row('Transport',40,50,80,'linear-gradient(90deg,#eab94a,#e0a52e)',false)}
+      ${row('Food',12.5,300,4,'linear-gradient(90deg,#5db97e,#4a9d6a)',false)}
+    </div>
+    <div class="say" style="font-size:15px">Rent is maxed out — everything else has room. Want me to bump the rent budget?</div>
+  `);
+}
+function reportShot(b){
+  return phone(b, `
+    <div class="urow"><div class="ubub">Break down where my money went this month</div></div>
+    <div class="stamp"><span>9:41 AM</span></div>
+    <div class="thinking">Architected interactive chart visualization with filters…</div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Total spend</div><div class="v">$54,529</div></div>
+      <div class="tile"><div class="k">Entries</div><div class="v">30</div></div>
+      <div class="tile"><div class="k">Top category</div><div class="v s">Travel</div></div>
+    </div>
+    <div class="card"><h3>Spending by category — July 2026</h3><div class="chart" id="chart-${b.cls}"></div></div>
+    <div class="say" style="font-size:14.5px"><b>Travel and Shopping dominate</b> — together over half of July's $54,529. The day-to-day categories stay under $2,000 each.</div>
+  `);
+}
+
+/* ---------------- desktop ---------------- */
+function desktop(b){
+  const led=(name,color,note,amt)=>`<div class="led"><div class="l"><span class="cdot" style="background:${color}"></span><b>${name}</b><span style="color:var(--muted);font-size:12.5px">${note}</span></div><span class="amt">$${amt}</span></div>`;
+  const brow=(name,spent,limit,pct,color,over)=>`<div class="brow"><div class="top" style="font-size:14px"><span>${name}${over?'<span class="over">OVER</span>':''}</span><span style="font-size:13px">$${spent} / $${limit}</span></div><div class="track2"><div class="fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div><div class="sub">${pct}% used</div></div>`;
+  return `<div class="browser ${b.cls}">
+    <div class="bbar"><span class="bdot" style="background:#f45b4e"></span><span class="bdot" style="background:#f5bd4f"></span><span class="bdot" style="background:#5bc24a"></span><span class="burl">${b.name.toLowerCase()}.com  ·  expense-tracker MCP</span></div>
+    <div class="dwrap">
+      <div class="side">
+        <div class="brand"><span class="logo">${b.logo}</span>Expense Tracker</div>
+        <div class="nav"><a class="on">▦ Dashboard</a><a>≣ Expenses</a><a>◎ Budgets</a><a>⤓ Export</a></div>
+      </div>
+      <div class="main">
+        <h1>July 2026 overview</h1>
+        <div class="subtle">Logged from ${b.name} · 30 expenses this month</div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">Total spend</div><div class="v">$54,529</div></div>
+          <div class="kpi"><div class="k">Top category</div><div class="v">Travel</div></div>
+          <div class="kpi"><div class="k">Over budget</div><div class="v" style="color:var(--bad)">Rent</div></div>
+        </div>
+        <div class="drow">
+          <div class="panel"><h2>Spending by category</h2>
+            ${led('Travel','#2f62b8','2 expenses','19,700')}
+            ${led('Shopping','#4a7fd6','5 expenses','10,850')}
+            ${led('Transport','#7aa2e0','4 expenses','4,830')}
+            ${led('Utilities','#e0a52e','2 expenses','4,350')}
+            ${led('Food','#4a9d6a','7 expenses','3,980')}
+            <div class="totrow"><span>Total</span><span>$54,529.00</span></div>
+          </div>
+          <div class="panel"><h2>Budget status</h2>
+            ${brow('Rent',1200,1200,100,'linear-gradient(90deg,#e57a5f,#d8674f)',true)}
+            ${brow('Transport',40,50,80,'linear-gradient(90deg,#eab94a,#e0a52e)',false)}
+            ${brow('Food',12.5,300,4,'linear-gradient(90deg,#5db97e,#4a9d6a)',false)}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- render ---------------- */
+const shots=[
+  ['Claude · mobile · add',       ()=>addShot(BRANDS.claude)],
+  ['ChatGPT · mobile · add',      ()=>addShot(BRANDS.chatgpt)],
+  ['Claude · mobile · receipt',   ()=>receiptShot(BRANDS.claude)],
+  ['ChatGPT · mobile · receipt',  ()=>receiptShot(BRANDS.chatgpt)],
+  ['Claude · mobile · budget',    ()=>budgetShot(BRANDS.claude)],
+  ['ChatGPT · mobile · budget',   ()=>budgetShot(BRANDS.chatgpt)],
+  ['Claude · mobile · report',    ()=>reportShot(BRANDS.claude)],
+  ['ChatGPT · mobile · report',   ()=>reportShot(BRANDS.chatgpt)],
+  ['Claude · desktop',            ()=>desktop(BRANDS.claude)],
+  ['ChatGPT · desktop',           ()=>desktop(BRANDS.chatgpt)],
+];
+const page=document.getElementById('page');
+for(const [cap,fn] of shots){
+  const s=document.createElement('div'); s.className='shot';
+  s.innerHTML=`<div class="cap">${cap}</div>${fn()}`;
+  page.appendChild(s);
+}
+/* charts */
+const DATA=[["Travel",19700],["Shopping",10850],["Transport",4830],["Utilities",4350],["Food",3980],["Gift",2500],["Bills",1850],["Health",1850],["Education",1800],["Entertainment",1099],["Misc",1000],["Office",720]];
+const MAX=20000, fmt=n=>"$"+n.toLocaleString("en-US");
+for(const cls of ['claude','chatgpt']){
+  const el=document.getElementById('chart-'+cls); if(!el)continue;
+  DATA.forEach(([c,v],i)=>{
+    const cat=document.createElement('div');cat.className='cat';cat.textContent=c;
+    const tr=document.createElement('div');tr.className='track';
+    const bar=document.createElement('div');bar.className='b'+(i===0?' top':'');bar.style.width=Math.max(v/MAX*100,2)+'%';tr.appendChild(bar);
+    const val=document.createElement('div');val.className='val';val.textContent=fmt(v);
+    el.append(cat,tr,val);
+  });
+}
+</script>
+</body>
+</html>
