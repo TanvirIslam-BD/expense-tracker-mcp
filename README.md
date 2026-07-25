@@ -18,6 +18,14 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
   <img src="./assets/screenshot-11-claude-desktop.png" alt="Spending report in the Claude desktop app" width="420">
 </p>
 
+> 🎨 **New light-theme UI mockups.** A polished, self-contained marketing set —
+> Claude + ChatGPT pairs across mobile *add / receipt / budget / report* and a
+> desktop dashboard — lives in [`assets/marketing/marketing-kit.html`](./assets/marketing/marketing-kit.html)
+> (plus a standalone spending-report chart in
+> [`assets/marketing-claude-mobile-light.html`](./assets/marketing-claude-mobile-light.html)).
+> Open either file in a browser to view or screenshot each screen at full
+> resolution.
+
 > Receipt photos are read by the host model's vision capability (Claude/ChatGPT) —
 > the server itself only receives the already-extracted amount, category, vendor,
 > and date via `add_expense`; it does not do OCR.
