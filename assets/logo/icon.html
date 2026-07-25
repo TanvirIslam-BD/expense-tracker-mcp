@@ -1,0 +1,55 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;padding:0;background:transparent;}
+  #stage{width:512px;height:512px;}
+</style></head>
+<body>
+<div id="stage">
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#3b0f7a" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- app-icon rounded square -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bg)"/>
+  <!-- subtle top highlight -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="#ffffff" opacity="0.06"/>
+
+  <!-- speech bubble -->
+  <g filter="url(#ds)">
+    <path d="M150 118
+             h212 a52 52 0 0 1 52 52
+             v150 a52 52 0 0 1 -52 52
+             h-150 l-58 56 v-56
+             h-4 a52 52 0 0 1 -52 -52
+             v-150 a52 52 0 0 1 52 -52 z" fill="#ffffff"/>
+  </g>
+
+  <!-- rising bar chart inside the bubble (tracked spending) -->
+  <g>
+    <rect x="168" y="272" width="42" height="62" rx="12" fill="url(#bar)"/>
+    <rect x="235" y="232" width="42" height="102" rx="12" fill="url(#bar)"/>
+    <rect x="302" y="186" width="42" height="148" rx="12" fill="url(#bar)"/>
+  </g>
+
+  <!-- AI sparkle accent on the tallest bar -->
+  <path d="M323 150 c4 22 14 32 36 36 c-22 4 -32 14 -36 36 c-4 -22 -14 -32 -36 -36 c22 -4 32 -14 36 -36 z"
+        fill="#7c3aed"/>
+
+  <!-- currency mark anchoring 'expenses' -->
+  <circle cx="196" cy="196" r="34" fill="#7c3aed"/>
+  <text x="196" y="212" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"
+        font-size="44" font-weight="800" fill="#ffffff" text-anchor="middle">$</text>
+</svg>
+</div>
+</body></html>

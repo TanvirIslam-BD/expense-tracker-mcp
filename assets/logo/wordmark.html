@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;padding:0;background:transparent;}
+  #stage{display:inline-flex;align-items:center;gap:34px;padding:40px 48px;width:max-content;
+    font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
+  .txt{white-space:nowrap;}
+  .txt .name{font-size:70px;font-weight:800;letter-spacing:-.03em;line-height:1;white-space:nowrap;}
+  .txt .name .mcp{color:#8b5cf6;}
+  .txt .tag{margin-top:12px;font-size:26px;font-weight:500;letter-spacing:.01em;}
+  /* theme via ?theme=dark|light */
+  :root{--ink:#14141b;--sub:#5b5b6b;}
+  body.dark{--ink:#f4f4f7;--sub:#a8a8ba;}
+  .name{color:var(--ink);} .tag{color:var(--sub);}
+</style></head>
+<body>
+<div id="stage">
+  <svg width="150" height="150" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+      <linearGradient id="bar" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+    </defs>
+    <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bg)"/>
+    <rect x="16" y="16" width="480" height="480" rx="116" fill="#ffffff" opacity="0.06"/>
+    <path d="M150 118 h212 a52 52 0 0 1 52 52 v150 a52 52 0 0 1 -52 52 h-150 l-58 56 v-56 h-4 a52 52 0 0 1 -52 -52 v-150 a52 52 0 0 1 52 -52 z" fill="#ffffff"/>
+    <rect x="168" y="272" width="42" height="62" rx="12" fill="url(#bar)"/>
+    <rect x="235" y="232" width="42" height="102" rx="12" fill="url(#bar)"/>
+    <rect x="302" y="186" width="42" height="148" rx="12" fill="url(#bar)"/>
+    <path d="M323 150 c4 22 14 32 36 36 c-22 4 -32 14 -36 36 c-4 -22 -14 -32 -36 -36 c22 -4 32 -14 36 -36 z" fill="#7c3aed"/>
+    <circle cx="196" cy="196" r="34" fill="#7c3aed"/>
+    <text x="196" y="212" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" font-size="44" font-weight="800" fill="#ffffff" text-anchor="middle">$</text>
+  </svg>
+  <div class="txt">
+    <div class="name">Expense Tracker <span class="mcp">MCP</span></div>
+    <div class="tag">Track expenses in chat — any AI assistant</div>
+  </div>
+</div>
+<script>
+  const t=new URLSearchParams(location.search).get('theme');
+  if(t==='dark') document.body.classList.add('dark');
+</script>
+</body></html>

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/logo/wordmark-dark.png">
+    <img src="./assets/logo/wordmark-light.png" alt="Expense Tracker MCP" width="460">
+  </picture>
+</p>
+
 # Expense Tracker MCP Server
 
 A personal **expense tracker** [Model Context Protocol](https://modelcontextprotocol.io) server,
