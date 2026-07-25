@@ -156,6 +156,35 @@
   .card .ic svg{width:22px;height:22px;stroke:var(--violet2);}
   .card h3{font-size:17px;margin-bottom:7px;}
   .card p{color:var(--ink2);font-size:14.5px;}
+  /* per-feature mini-visuals */
+  .viz{position:relative;z-index:1;margin-top:16px;padding-top:16px;border-top:1px solid var(--line);
+    display:flex;align-items:center;gap:8px;min-height:46px;font-size:11.5px;}
+  .viz .cbub{background:linear-gradient(180deg,var(--violet2),var(--violet));color:#fff;padding:5px 10px;border-radius:10px 10px 3px 10px;white-space:nowrap;}
+  .viz .arrow{color:var(--muted);}
+  .viz .chip{background:var(--panel2);border:1px solid var(--line2);color:var(--ink2);padding:4px 9px;border-radius:8px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap;}
+  .viz .chip .ok{width:13px;height:13px;border-radius:50%;background:#22c55e;color:#fff;display:grid;place-items:center;font-size:8px;}
+  .viz .bars{display:flex;align-items:flex-end;gap:7px;height:40px;}
+  .viz .bars i{width:15px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--violet2),var(--violet));}
+  .viz .bars i:nth-child(4){background:linear-gradient(180deg,#3f70c6,var(--violet));opacity:.55;}
+  .viz .barlbl{color:var(--muted);font-size:10.5px;margin-left:2px;}
+  .viz .rcpt{width:38px;height:44px;background:#f4f2ec;border-radius:4px;padding:5px 5px;display:flex;flex-direction:column;gap:3px;flex:0 0 38px;position:relative;overflow:hidden;box-shadow:0 4px 12px -6px rgba(0,0,0,.5);}
+  .viz .rcpt span{height:3px;background:#c9c4b8;border-radius:2px;}
+  .viz .rcpt span:nth-child(1){width:70%;background:#8a8577;}
+  .viz .scan{position:absolute;left:0;right:0;height:10px;background:linear-gradient(180deg,transparent,rgba(139,92,246,.55),transparent);animation:scan 2.2s ease-in-out infinite;}
+  @keyframes scan{0%,100%{top:2px}50%{top:32px}}
+  .viz .sbar{flex:1;display:flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:6px 9px;color:var(--muted);}
+  .viz .sbar svg{width:13px;height:13px;stroke:var(--violet2);flex:0 0 13px;}
+  .viz .rows{display:flex;flex-direction:column;gap:5px;flex:1;}
+  .viz .rows i{height:6px;background:var(--line2);border-radius:3px;}
+  .viz .rows i:nth-child(1){width:80%;background:var(--violet);opacity:.5;}
+  .viz .rows i:nth-child(2){width:60%;}
+  .viz .nobank{display:flex;align-items:center;gap:8px;}
+  .viz .cardico{position:relative;width:40px;height:26px;border-radius:5px;background:linear-gradient(135deg,#2a2440,#1a1730);border:1px solid var(--line2);flex:0 0 40px;}
+  .viz .cardico::before{content:"";position:absolute;top:6px;left:0;right:0;height:5px;background:#3a3450;}
+  .viz .cardico::after{content:"";position:absolute;inset:-2px;border-top:2px solid #f87171;transform:rotate(-27deg);transform-origin:center;}
+  .viz .logos{display:flex;gap:6px;flex-wrap:wrap;}
+  .viz .lchip{border:1px solid var(--line2);background:var(--panel2);border-radius:999px;padding:4px 9px;color:var(--ink2);display:inline-flex;gap:5px;align-items:center;font-size:10.5px;}
+  .viz .lchip svg{width:11px;height:11px;}
 
   /* ---------- live example ---------- */
   .chat{max-width:560px;margin:48px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:24px;box-shadow:0 40px 100px -40px rgba(139,92,246,.3);}
@@ -433,31 +462,37 @@
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
         <h3>Natural-language logging</h3>
         <p>Just describe what you spent. No forms, no fields, no dropdowns — the AI structures it correctly every time.</p>
+        <div class="viz"><span class="cbub">spent $12 on lunch</span><span class="arrow">→</span><span class="chip"><span class="ok">✓</span>$12 · Food</span></div>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
         <h3>Receipt photo scanning</h3>
         <p>Drop in a receipt image. The host model extracts the vendor, total, and date and logs it — no manual entry.</p>
+        <div class="viz"><span class="rcpt"><span class="scan"></span><span></span><span></span><span></span><span></span></span><span class="arrow">→</span><span class="chip"><span class="ok">✓</span>$38.42 · Groceries</span></div>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/></svg></div>
         <h3>Monthly & category summaries</h3>
         <p>Spending grouped by category or month, with totals and trends — generated on demand, right in the conversation.</p>
+        <div class="viz"><span class="bars"><i style="height:34px"></i><i style="height:24px"></i><i style="height:16px"></i><i style="height:10px"></i></span><span class="barlbl">Travel · Food · Bills · Misc</span></div>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
         <h3>Search & filter history</h3>
         <p>Find any past expense by keyword, category, or date range — “show every coffee in July” just works.</p>
+        <div class="viz"><span class="sbar"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>coffee in July</span><span class="rows"><i></i><i></i></span></div>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h.01"/><path d="M4 4l16 16" stroke="#f87171"/></svg></div>
         <h3>No bank linking</h3>
         <p>Never connects to your bank or cards. You log what you choose — your financial accounts stay untouched.</p>
+        <div class="viz"><span class="nobank"><span class="cardico"></span><span class="chip" style="border-color:rgba(248,113,113,.4);color:#f0a0a0">No account access</span></span></div>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></div>
         <h3>Works with any MCP client</h3>
         <p>One server, every assistant. Claude, ChatGPT, Gemini, Cursor, or anything that speaks the Model Context Protocol.</p>
+        <div class="viz"><span class="logos"><span class="lchip"><svg viewBox="0 0 24 24" fill="#a78bfa"><path d="M12 2c.5 4.5 3.5 7.5 8 8-4.5.5-7.5 3.5-8 8-.5-4.5-3.5-7.5-8-8 4.5-.5 7.5-3.5 8-8z"/></svg>Claude</span><span class="lchip"><svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>ChatGPT</span><span class="lchip"><svg viewBox="0 0 24 24" fill="#a78bfa"><path d="M12 2c.5 4.5 3.5 7.5 8 8-4.5.5-7.5 3.5-8 8-.5-4.5-3.5-7.5-8-8 4.5-.5 7.5-3.5 8-8z"/></svg>Gemini</span></span></div>
       </div>
     </div>
   </div>
