@@ -6,19 +6,7 @@ written in TypeScript and packaged for the [MCPize](https://mcpize.com) marketpl
 Record expenses, set monthly budgets, and generate spending summaries — from Claude,
 Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatically.
 
-<p align="center">
-  <img src="./assets/screenshot-1-chatgpt-mobile.png" alt="Spending report in ChatGPT mobile" width="220">
-  <img src="./assets/screenshot-2-claude-mobile.png" alt="Spending report in Claude mobile" width="220">
-  <img src="./assets/screenshot-7-chatgpt-light-add.png" alt="Adding an expense by natural-language prompt in ChatGPT light mode" width="220">
-  <img src="./assets/screenshot-8-chatgpt-light-receipt.png" alt="Logging an expense from a realistic receipt photo in ChatGPT light mode" width="220">
-  <img src="./assets/screenshot-9-claude-light-receipt.png" alt="Logging an expense from a realistic receipt photo in Claude light mode" width="220">
-</p>
-<p align="center">
-  <img src="./assets/screenshot-10-chatgpt-desktop.png" alt="Spending report in the ChatGPT desktop app" width="420">
-  <img src="./assets/screenshot-11-claude-desktop.png" alt="Spending report in the Claude desktop app" width="420">
-</p>
-
-### Light-theme UI — the same flows in Claude and ChatGPT
+### The same flows in Claude and ChatGPT
 
 Log an expense in plain language, or drop in a receipt photo:
 
@@ -414,24 +402,37 @@ is already in that file: call `client.callTool({name, arguments})`, and use the
 `jsonOf()`/`textOf()` helpers to pull structured data back out of the
 ```json fenced block every tool response includes.
 
-### Marketplace asset generation — no browser needed, reproduce this way
+### Marketplace asset generation — HTML mockups → Chrome headless
 
-The icon and screenshots in `assets/` were **not** captured from a live app —
+The screenshots in `assets/marketing/` were **not** captured from a live app —
 there is no web UI in this project, since MCP tool calls render however the
-host client (Claude, ChatGPT, etc.) chooses to display them. They were built
-as hand-authored SVG mockups of what those clients' UIs look like, then
-rasterized to exact-pixel PNGs with the `sharp` npm package (which ships
-prebuilt binaries, so it installs cleanly on Windows without ImageMagick/
-Inkscape/cairo). This was a deliberate fallback after an attempt to screenshot
-rendered HTML via a browser preview tool produced viewport/scaling
-inconsistencies (reported dimensions didn't match the captured pixels) — SVG →
-`sharp` was simpler and pixel-exact. If more screenshots are needed later,
-reuse that pattern: author an SVG at the target resolution, rasterize with a
-throwaway `sharp` install in a scratch directory, copy the PNG into `assets/`,
-delete the scratch `node_modules`. The receipt-photo mockups are careful to
-depict the **host model** doing OCR/extraction and calling `add_expense` with
-already-structured fields — the server itself has no image or OCR capability,
-and the mockups must not misrepresent that.
+host client (Claude, ChatGPT, etc.) chooses to display them. They are
+hand-authored HTML mockups of what those clients' UIs look like, kept in a
+single self-contained source of truth, `assets/marketing/marketing-kit.html`.
+That file renders a gallery of all shots by default, or a single bare shot when
+loaded with `?shot=<name>` (e.g. `?shot=claude-report`) — see the `shots` array
+in its script for the full list of ids.
+
+To (re)generate the PNGs, drive the HTML with headless Chrome — no npm
+dependency, just the Chrome already on the machine:
+
+```bash
+chrome --headless=new --disable-gpu --hide-scrollbars \
+  --force-device-scale-factor=2 --default-background-color=00000000 \
+  --screenshot="claude-report.png" --window-size=458,982 \
+  "file:///…/assets/marketing/marketing-kit.html?shot=claude-report"
+```
+
+`--force-device-scale-factor=2` gives crisp 2× output; the transparent
+background keeps the phone frame's rounded corners clean for embedding.
+Per-shot `--window-size` values are sized to each mockup's bounds (mobile ≈
+458×882–982, desktop ≈ 1240×764). Chrome may refuse to write into the repo dir
+— render into a scratch dir and copy the PNGs into `assets/marketing/`.
+
+The receipt-photo mockups are careful to depict the **host model** doing
+OCR/extraction and calling `add_expense` with already-structured fields — the
+server itself has no image or OCR capability, and the mockups must not
+misrepresent that.
 
 ### Open items / natural next steps
 
