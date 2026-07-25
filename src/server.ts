@@ -6,7 +6,6 @@ import {
   formatMoney,
   isValidDate,
   isValidMonth,
-  monthOf,
   resolveCategory,
   toMajor,
   toMinor,
@@ -80,11 +79,125 @@ function renderTotals(totals: Record<string, number>): string {
 }
 
 /**
+ * Tool input schemas, built ONCE at module load and shared across every
+ * per-request server. In stateless HTTP mode a fresh McpServer is built per
+ * request; the zod validators here are pure/static (no per-request state), so
+ * reconstructing ~40 of them on every request is wasted CPU. Hoisting them out
+ * lets each request reuse the same validated schema objects. (Handlers still
+ * close over the per-request userId, so they stay inside buildServer.)
+ */
+const TOOL_INPUTS = {
+  add_expense: {
+    amount: moneyAmount(),
+    category: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Category, e.g. food, transport, rent, utilities, entertainment, " +
+          "shopping, health. If the user didn't state a category, YOU should " +
+          "infer the most fitting one from the description/context and pass " +
+          "it here — don't leave it blank. (If it's still omitted, the server " +
+          "falls back to keyword inference, then 'uncategorized'.)",
+      ),
+    description: z.string().default("").describe("Optional note"),
+    date: z.string().optional().describe("Date YYYY-MM-DD; defaults to today"),
+    currency: z
+      .string()
+      .length(3)
+      .optional()
+      .describe("ISO-4217 code; defaults to server currency"),
+  },
+  add_expenses: {
+    expenses: z
+      .array(
+        z.object({
+          amount: moneyAmount("Amount in major units"),
+          category: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Category. If the user didn't state one, infer the most " +
+                "fitting category yourself rather than leaving it blank.",
+            ),
+          description: z.string().default("").describe("Optional note"),
+          date: z.string().optional().describe("Date YYYY-MM-DD; defaults to today"),
+          currency: z.string().length(3).optional().describe("ISO-4217 code"),
+        }),
+      )
+      .min(1)
+      .max(100)
+      .describe("The expenses to add (1–100)"),
+  },
+  list_expenses: {
+    category: z.string().optional().describe("Filter by category"),
+    search: z
+      .string()
+      .optional()
+      .describe("Case-insensitive text match on the note/description or category"),
+    from: z.string().optional().describe("Start date YYYY-MM-DD (inclusive)"),
+    to: z.string().optional().describe("End date YYYY-MM-DD (inclusive)"),
+    limit: z.number().int().positive().max(500).default(50),
+  },
+  get_expense: { id: z.string().min(1).describe("Expense id") },
+  get_recent_expense: {
+    category: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional: only consider expenses in this category"),
+  },
+  update_expense: {
+    id: z.string().min(1).describe("Expense id"),
+    amount: moneyAmount("New amount in major units").optional(),
+    category: z.string().min(1).optional(),
+    description: z.string().optional(),
+    date: z.string().optional().describe("YYYY-MM-DD"),
+    currency: z.string().length(3).optional(),
+  },
+  delete_expense: { id: z.string().min(1).describe("Expense id") },
+  summarize_expenses: {
+    group_by: z.enum(["category", "month"]).default("category"),
+    from: z.string().optional().describe("Start date YYYY-MM-DD (inclusive)"),
+    to: z.string().optional().describe("End date YYYY-MM-DD (inclusive)"),
+  },
+  set_budget: {
+    amount: moneyAmount("Monthly limit in major units"),
+    category: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Category; omit for an overall budget"),
+    currency: z.string().length(3).optional(),
+  },
+  delete_budget: {
+    category: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Category; omit for the overall budget"),
+  },
+  get_budget_status: {
+    month: z
+      .string()
+      .optional()
+      .describe("Month YYYY-MM; defaults to current month"),
+  },
+  export_expenses: {
+    format: z.enum(["csv", "json"]).default("csv"),
+    from: z.string().optional(),
+    to: z.string().optional(),
+  },
+};
+
+/**
  * Build a fully-configured MCP server bound to one store and one user id.
  *
- * In stateless HTTP mode a fresh server is built per request (cheap), with the
+ * In stateless HTTP mode a fresh server is built per request, with the
  * subscriber's id captured in this closure; the store itself is a shared
- * singleton, so data persists across requests.
+ * singleton, so data persists across requests. Tool input schemas are reused
+ * from the module-level TOOL_INPUTS (built once) rather than rebuilt here.
  */
 export function buildServer(store: ExpenseStore, userId: string): McpServer {
   const server = new McpServer(
@@ -113,27 +226,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Record a new expense. Amount is a positive decimal in major units " +
         "(e.g. 12.50). Date defaults to today.",
-      inputSchema: {
-        amount: moneyAmount(),
-        category: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            "Category, e.g. food, transport, rent, utilities, entertainment, " +
-              "shopping, health. If the user didn't state a category, YOU should " +
-              "infer the most fitting one from the description/context and pass " +
-              "it here — don't leave it blank. (If it's still omitted, the server " +
-              "falls back to keyword inference, then 'uncategorized'.)",
-          ),
-        description: z.string().default("").describe("Optional note"),
-        date: z.string().optional().describe("Date YYYY-MM-DD; defaults to today"),
-        currency: z
-          .string()
-          .length(3)
-          .optional()
-          .describe("ISO-4217 code; defaults to server currency"),
-      },
+      inputSchema: TOOL_INPUTS.add_expense,
     },
     async ({ amount, category, description, date, currency }) => {
       const d = date ?? todayISO();
@@ -165,28 +258,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Record several expenses in one call — efficient for a receipt with " +
         "many line items or logging a whole day's spending at once. Each item " +
         "takes the same fields as add_expense.",
-      inputSchema: {
-        expenses: z
-          .array(
-            z.object({
-              amount: moneyAmount("Amount in major units"),
-              category: z
-                .string()
-                .min(1)
-                .optional()
-                .describe(
-                  "Category. If the user didn't state one, infer the most " +
-                    "fitting category yourself rather than leaving it blank.",
-                ),
-              description: z.string().default("").describe("Optional note"),
-              date: z.string().optional().describe("Date YYYY-MM-DD; defaults to today"),
-              currency: z.string().length(3).optional().describe("ISO-4217 code"),
-            }),
-          )
-          .min(1)
-          .max(100)
-          .describe("The expenses to add (1–100)"),
-      },
+      inputSchema: TOOL_INPUTS.add_expenses,
     },
     async ({ expenses }) => {
       const today = todayISO();
@@ -225,16 +297,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "List expenses, newest first, with optional category, date-range, and " +
         "free-text filters. Use `search` to find expenses by a word in the " +
         "note/description (e.g. \"coffee\") or category.",
-      inputSchema: {
-        category: z.string().optional().describe("Filter by category"),
-        search: z
-          .string()
-          .optional()
-          .describe("Case-insensitive text match on the note/description or category"),
-        from: z.string().optional().describe("Start date YYYY-MM-DD (inclusive)"),
-        to: z.string().optional().describe("End date YYYY-MM-DD (inclusive)"),
-        limit: z.number().int().positive().max(500).default(50),
-      },
+      inputSchema: TOOL_INPUTS.list_expenses,
     },
     async ({ category, search, from, to, limit }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);
@@ -266,7 +329,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Get expense",
       description: "Fetch a single expense by its id.",
-      inputSchema: { id: z.string().min(1).describe("Expense id") },
+      inputSchema: TOOL_INPUTS.get_expense,
     },
     async ({ id }) => {
       const expense = await store.getExpense(userId, id);
@@ -284,13 +347,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "category). Use this to resolve references like \"my last expense\" or " +
         "\"that coffee I just added\" into a concrete id you can then pass to " +
         "update_expense or delete_expense.",
-      inputSchema: {
-        category: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("Optional: only consider expenses in this category"),
-      },
+      inputSchema: TOOL_INPUTS.get_recent_expense,
     },
     async ({ category }) => {
       const [expense] = await store.listExpenses(userId, { category, limit: 1 });
@@ -314,14 +371,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Update expense",
       description:
         "Update fields of an existing expense. Only provided fields change.",
-      inputSchema: {
-        id: z.string().min(1).describe("Expense id"),
-        amount: moneyAmount("New amount in major units").optional(),
-        category: z.string().min(1).optional(),
-        description: z.string().optional(),
-        date: z.string().optional().describe("YYYY-MM-DD"),
-        currency: z.string().length(3).optional(),
-      },
+      inputSchema: TOOL_INPUTS.update_expense,
     },
     async ({ id, amount, category, description, date, currency }) => {
       if (date && !isValidDate(date)) return fail(`Invalid date "${date}".`);
@@ -353,7 +403,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Delete expense",
       description: "Delete an expense by its id.",
-      inputSchema: { id: z.string().min(1).describe("Expense id") },
+      inputSchema: TOOL_INPUTS.delete_expense,
     },
     async ({ id }) => {
       const removed = await store.deleteExpense(userId, id);
@@ -370,31 +420,20 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Aggregate spending grouped by category or by month, within an " +
         "optional date range.",
-      inputSchema: {
-        group_by: z.enum(["category", "month"]).default("category"),
-        from: z.string().optional().describe("Start date YYYY-MM-DD (inclusive)"),
-        to: z.string().optional().describe("End date YYYY-MM-DD (inclusive)"),
-      },
+      inputSchema: TOOL_INPUTS.summarize_expenses,
     },
     async ({ group_by, from, to }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);
       if (to && !isValidDate(to)) return fail(`Invalid "to" date: ${to}`);
 
-      const items = await store.listExpenses(userId, { from, to });
-      if (items.length === 0) return text("No expenses found for that range.");
+      // Grouping + summing happens in the store (SQL GROUP BY on Turso), so we
+      // never pull the full row set back just to fold it in memory here.
+      const groups = await store.aggregate(userId, { groupBy: group_by, from, to });
+      if (groups.length === 0) return text("No expenses found for that range.");
 
-      const groups = new Map<string, { totals: Record<string, number>; count: number }>();
-      for (const e of items) {
-        const key = group_by === "month" ? monthOf(e.date) : e.category;
-        const g = groups.get(key) ?? { totals: {}, count: 0 };
-        g.totals[e.currency] = (g.totals[e.currency] ?? 0) + e.amountMinor;
-        g.count += 1;
-        groups.set(key, g);
-      }
-
-      const rows = [...groups.entries()]
-        .map(([key, g]) => ({
-          key,
+      const rows = groups
+        .map((g) => ({
+          key: g.key,
           count: g.count,
           // Sort weight: sum of minor units across currencies (rough but stable).
           weight: Object.values(g.totals).reduce((a, b) => a + b, 0),
@@ -404,7 +443,15 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
           group_by === "month" ? b.key.localeCompare(a.key) : b.weight - a.weight,
         );
 
-      const overall = totalsByCurrency(items);
+      // Fold overall totals + count from the grouped buckets.
+      const overall: Record<string, number> = {};
+      let totalCount = 0;
+      for (const r of rows) {
+        totalCount += r.count;
+        for (const [c, m] of Object.entries(r.totals)) {
+          overall[c] = (overall[c] ?? 0) + m;
+        }
+      }
       const lines = rows.map(
         (r) => `• ${r.key.padEnd(16)}  ${renderTotals(r.totals)}  (${r.count})`,
       );
@@ -425,7 +472,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       };
 
       return text(
-        `Spending by ${group_by} (${items.length} expenses, ` +
+        `Spending by ${group_by} (${totalCount} expenses, ` +
           `total ${renderTotals(overall)}):\n` +
           lines.join("\n") +
           "\n\n" +
@@ -442,15 +489,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Set a monthly budget. Omit category for an overall budget; provide a " +
         "category for a per-category budget. Re-setting overwrites the existing " +
         "budget for that category.",
-      inputSchema: {
-        amount: moneyAmount("Monthly limit in major units"),
-        category: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("Category; omit for an overall budget"),
-        currency: z.string().length(3).optional(),
-      },
+      inputSchema: TOOL_INPUTS.set_budget,
     },
     async ({ amount, category, currency }) => {
       const budget = await store.setBudget({
@@ -503,13 +542,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Remove a monthly budget. Omit category to delete the overall budget; " +
         "provide a category to delete that category's budget.",
-      inputSchema: {
-        category: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("Category; omit for the overall budget"),
-      },
+      inputSchema: TOOL_INPUTS.delete_budget,
     },
     async ({ category }) => {
       const target = category ? category.trim().toLowerCase() : null;
@@ -529,12 +562,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Compare this month's (or a given month's) spending against your " +
         "budgets. Reports spent, remaining, and over-budget flags.",
-      inputSchema: {
-        month: z
-          .string()
-          .optional()
-          .describe("Month YYYY-MM; defaults to current month"),
-      },
+      inputSchema: TOOL_INPUTS.get_budget_status,
     },
     async ({ month }) => {
       const m = month ?? currentMonth();
@@ -610,23 +638,17 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: {},
     },
     async () => {
-      const items = await store.listExpenses(userId);
-      if (items.length === 0) return text("No expenses recorded yet.");
+      // Category counts + totals computed in the store (SQL GROUP BY), not by
+      // fetching every expense and folding it here.
+      const groups = await store.aggregate(userId, { groupBy: "category" });
+      if (groups.length === 0) return text("No expenses recorded yet.");
 
-      const byCat = new Map<string, { count: number; totals: Record<string, number> }>();
-      for (const e of items) {
-        const g = byCat.get(e.category) ?? { count: 0, totals: {} };
-        g.count += 1;
-        g.totals[e.currency] = (g.totals[e.currency] ?? 0) + e.amountMinor;
-        byCat.set(e.category, g);
-      }
-
-      const rows = [...byCat.entries()].sort((a, b) => b[1].count - a[1].count);
+      const rows = groups.sort((a, b) => b.count - a.count);
       const lines = rows.map(
-        ([cat, g]) => `• ${cat.padEnd(16)} ${g.count} expense(s), ${renderTotals(g.totals)}`,
+        (g) => `• ${g.key.padEnd(16)} ${g.count} expense(s), ${renderTotals(g.totals)}`,
       );
-      const structured = rows.map(([cat, g]) => ({
-        category: cat,
+      const structured = rows.map((g) => ({
+        category: g.key,
         count: g.count,
         totals: Object.fromEntries(
           Object.entries(g.totals).map(([c, m]) => [c, toMajor(m)]),
@@ -642,11 +664,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Export expenses",
       description: "Export expenses as CSV or JSON, with an optional date range.",
-      inputSchema: {
-        format: z.enum(["csv", "json"]).default("csv"),
-        from: z.string().optional(),
-        to: z.string().optional(),
-      },
+      inputSchema: TOOL_INPUTS.export_expenses,
     },
     async ({ format, from, to }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);

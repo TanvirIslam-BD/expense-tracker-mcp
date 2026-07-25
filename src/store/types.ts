@@ -58,6 +58,23 @@ export interface NewBudget {
   currency: string;
 }
 
+/** One aggregation bucket: a group key with its count and per-currency totals. */
+export interface AggregateGroup {
+  /** The category name or `YYYY-MM` month, depending on how it was grouped. */
+  key: string;
+  count: number;
+  /** currency code -> summed amount in minor units. */
+  totals: Record<string, number>;
+}
+
+export interface AggregateOptions {
+  groupBy: "category" | "month";
+  /** Inclusive start date, YYYY-MM-DD. */
+  from?: string;
+  /** Inclusive end date, YYYY-MM-DD. */
+  to?: string;
+}
+
 export interface ExpenseStore {
   init(): Promise<void>;
 
@@ -68,6 +85,13 @@ export interface ExpenseStore {
   listExpenses(userId: string, filter?: ExpenseFilter): Promise<Expense[]>;
   updateExpense(userId: string, id: string, patch: ExpensePatch): Promise<Expense | null>;
   deleteExpense(userId: string, id: string): Promise<boolean>;
+
+  /**
+   * Aggregate spending grouped by category or month, summed per currency.
+   * Pushed to the storage layer (SQL GROUP BY where supported) so summaries
+   * scale with the number of groups, not the number of rows.
+   */
+  aggregate(userId: string, opts: AggregateOptions): Promise<AggregateGroup[]>;
 
   /** Upserts by (userId, category) — one budget per category (or overall). */
   setBudget(budget: NewBudget): Promise<Budget>;

@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { newId } from "../util.js";
 import type {
+  AggregateGroup,
+  AggregateOptions,
   Budget,
   Expense,
   ExpenseFilter,
@@ -154,6 +156,25 @@ export class MemoryStore implements ExpenseStore {
     const removed = this.db.expenses.length < before;
     if (removed) this.persist();
     return removed;
+  }
+
+  async aggregate(
+    userId: string,
+    opts: AggregateOptions,
+  ): Promise<AggregateGroup[]> {
+    let items = this.db.expenses.filter((e) => e.userId === userId);
+    if (opts.from) items = items.filter((e) => e.date >= opts.from!);
+    if (opts.to) items = items.filter((e) => e.date <= opts.to!);
+
+    const map = new Map<string, AggregateGroup>();
+    for (const e of items) {
+      const key = opts.groupBy === "month" ? e.date.slice(0, 7) : e.category;
+      const g = map.get(key) ?? { key, count: 0, totals: {} };
+      g.count += 1;
+      g.totals[e.currency] = (g.totals[e.currency] ?? 0) + e.amountMinor;
+      map.set(key, g);
+    }
+    return [...map.values()];
   }
 
   async setBudget(input: NewBudget): Promise<Budget> {

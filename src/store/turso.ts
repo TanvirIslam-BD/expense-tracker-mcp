@@ -1,6 +1,8 @@
 import { createClient, type Client } from "@libsql/client";
 import { newId } from "../util.js";
 import type {
+  AggregateGroup,
+  AggregateOptions,
   Budget,
   Expense,
   ExpenseFilter,
@@ -59,6 +61,16 @@ export class TursoStore implements ExpenseStore {
       ],
       "write",
     );
+
+    // Warm the connection while we're already awaiting boot: this first round
+    // trip pays the TLS/handshake + (on a remote Turso) any cross-region setup,
+    // so the first *user* request after a scale-to-zero wake is already hot.
+    // Runs off the request path (init() is awaited before the server listens).
+    try {
+      await this.client.execute("SELECT 1");
+    } catch {
+      // A failed warm-up is non-fatal — the real query will surface any error.
+    }
   }
 
   private rowToExpense(row: Record<string, unknown>): Expense {
@@ -223,6 +235,43 @@ export class TursoStore implements ExpenseStore {
       args: [userId, id],
     });
     return r.rowsAffected > 0;
+  }
+
+  async aggregate(
+    userId: string,
+    opts: AggregateOptions,
+  ): Promise<AggregateGroup[]> {
+    // Group + sum in the database (GROUP BY key, currency) so the payload is
+    // O(groups) rather than O(rows) — no full-history fetch to aggregate in JS.
+    const keyExpr = opts.groupBy === "month" ? "substr(date, 1, 7)" : "category";
+    const clauses = ["user_id = ?"];
+    const args: (string | number)[] = [userId];
+    if (opts.from) {
+      clauses.push("date >= ?");
+      args.push(opts.from);
+    }
+    if (opts.to) {
+      clauses.push("date <= ?");
+      args.push(opts.to);
+    }
+    const r = await this.client.execute({
+      sql: `SELECT ${keyExpr} AS k, currency AS cur,
+                   COUNT(*) AS c, SUM(amount_minor) AS s
+            FROM expenses WHERE ${clauses.join(" AND ")}
+            GROUP BY k, cur`,
+      args,
+    });
+
+    const map = new Map<string, AggregateGroup>();
+    for (const row of r.rows as unknown as Record<string, unknown>[]) {
+      const key = String(row.k);
+      const cur = String(row.cur);
+      const g = map.get(key) ?? { key, count: 0, totals: {} };
+      g.count += Number(row.c);
+      g.totals[cur] = (g.totals[cur] ?? 0) + Number(row.s);
+      map.set(key, g);
+    }
+    return [...map.values()];
   }
 
   async setBudget(input: NewBudget): Promise<Budget> {

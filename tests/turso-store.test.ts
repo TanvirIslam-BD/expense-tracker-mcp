@@ -114,6 +114,29 @@ describe("TursoStore — expenses", () => {
     expect((await store.listExpenses("bob")).length).toBe(1);
     expect((await store.listExpenses("carol")).length).toBe(0);
   });
+
+  it("aggregates by category and by month via SQL GROUP BY", async () => {
+    await store.addExpense(expense({ category: "food", amountMinor: 1000, date: "2026-07-01" }));
+    await store.addExpense(expense({ category: "food", amountMinor: 500, date: "2026-07-05" }));
+    await store.addExpense(expense({ category: "transport", amountMinor: 2000, date: "2026-08-02" }));
+    // A second currency in the same category must fold into its own bucket key.
+    await store.addExpense(expense({ category: "food", amountMinor: 300, currency: "EUR", date: "2026-07-09" }));
+
+    const byCat = await store.aggregate("alice", { groupBy: "category" });
+    const food = byCat.find((g) => g.key === "food")!;
+    expect(food.count).toBe(3);
+    expect(food.totals.USD).toBe(1500);
+    expect(food.totals.EUR).toBe(300);
+    expect(byCat.find((g) => g.key === "transport")!.totals.USD).toBe(2000);
+
+    const byMonth = await store.aggregate("alice", { groupBy: "month" });
+    expect(byMonth.find((g) => g.key === "2026-07")!.count).toBe(3);
+    expect(byMonth.find((g) => g.key === "2026-08")!.count).toBe(1);
+
+    // Date range is honored.
+    const july = await store.aggregate("alice", { groupBy: "category", from: "2026-07-01", to: "2026-07-31" });
+    expect(july.some((g) => g.key === "transport")).toBe(false);
+  });
 });
 
 describe("TursoStore — budgets", () => {
