@@ -227,6 +227,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Record a new expense. Amount is a positive decimal in major units " +
         "(e.g. 12.50). Date defaults to today.",
       inputSchema: TOOL_INPUTS.add_expense,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ amount, category, description, date, currency }) => {
       const d = date ?? todayISO();
@@ -259,6 +265,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "many line items or logging a whole day's spending at once. Each item " +
         "takes the same fields as add_expense.",
       inputSchema: TOOL_INPUTS.add_expenses,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ expenses }) => {
       const today = todayISO();
@@ -298,6 +310,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "free-text filters. Use `search` to find expenses by a word in the " +
         "note/description (e.g. \"coffee\") or category.",
       inputSchema: TOOL_INPUTS.list_expenses,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ category, search, from, to, limit }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);
@@ -330,6 +348,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Get expense",
       description: "Fetch a single expense by its id.",
       inputSchema: TOOL_INPUTS.get_expense,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ id }) => {
       const expense = await store.getExpense(userId, id);
@@ -348,6 +372,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "\"that coffee I just added\" into a concrete id you can then pass to " +
         "update_expense or delete_expense.",
       inputSchema: TOOL_INPUTS.get_recent_expense,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ category }) => {
       const [expense] = await store.listExpenses(userId, { category, limit: 1 });
@@ -372,6 +402,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Update fields of an existing expense. Only provided fields change.",
       inputSchema: TOOL_INPUTS.update_expense,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ id, amount, category, description, date, currency }) => {
       if (date && !isValidDate(date)) return fail(`Invalid date "${date}".`);
@@ -404,6 +440,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Delete expense",
       description: "Delete an expense by its id.",
       inputSchema: TOOL_INPUTS.delete_expense,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ id }) => {
       const removed = await store.deleteExpense(userId, id);
@@ -421,6 +463,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Aggregate spending grouped by category or by month, within an " +
         "optional date range.",
       inputSchema: TOOL_INPUTS.summarize_expenses,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ group_by, from, to }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);
@@ -490,6 +538,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "category for a per-category budget. Re-setting overwrites the existing " +
         "budget for that category.",
       inputSchema: TOOL_INPUTS.set_budget,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ amount, category, currency }) => {
       const budget = await store.setBudget({
@@ -514,6 +568,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "List all monthly budgets you've set — the overall budget and any " +
         "per-category budgets.",
       inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async () => {
       const budgets = await store.listBudgets(userId);
@@ -543,6 +603,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Remove a monthly budget. Omit category to delete the overall budget; " +
         "provide a category to delete that category's budget.",
       inputSchema: TOOL_INPUTS.delete_budget,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ category }) => {
       const target = category ? category.trim().toLowerCase() : null;
@@ -563,6 +629,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Compare this month's (or a given month's) spending against your " +
         "budgets. Reports spent, remaining, and over-budget flags.",
       inputSchema: TOOL_INPUTS.get_budget_status,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ month }) => {
       const m = month ?? currentMonth();
@@ -636,6 +708,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "List the categories you've used, with expense counts and totals.",
       inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async () => {
       // Category counts + totals computed in the store (SQL GROUP BY), not by
@@ -665,6 +743,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Export expenses",
       description: "Export expenses as CSV or JSON, with an optional date range.",
       inputSchema: TOOL_INPUTS.export_expenses,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ format, from, to }) => {
       if (from && !isValidDate(from)) return fail(`Invalid "from" date: ${from}`);

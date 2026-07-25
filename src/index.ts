@@ -80,6 +80,16 @@ async function startHttp(): Promise<void> {
   app.get("/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", server: "expense-tracker", version: "1.0.0" });
   });
+
+  // Domain-ownership check for the OpenAI Apps/MCP directory submission flow.
+  // Serves the verification token OpenAI issues at the well-known path it
+  // polls; override via env var so the token isn't pinned in source.
+  const OPENAI_APPS_CHALLENGE_TOKEN =
+    process.env.OPENAI_APPS_CHALLENGE_TOKEN ||
+    "yqb2BkBk70m95rd9eVpIMobCvynU0v3cOUDDG1TbGJ8";
+  app.get("/.well-known/openai-apps-challenge", (_req: Request, res: Response) => {
+    res.type("text/plain").send(OPENAI_APPS_CHALLENGE_TOKEN);
+  });
   app.get("/", (_req: Request, res: Response) => {
     res.json({
       name: "expense-tracker-mcp",
