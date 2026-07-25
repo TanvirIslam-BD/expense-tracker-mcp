@@ -10,6 +10,7 @@ const TOOL_NAMES = [
   "add_expenses",
   "list_expenses",
   "get_expense",
+  "get_recent_expense",
   "update_expense",
   "delete_expense",
   "summarize_expenses",
@@ -47,6 +48,22 @@ async function isToolError(client: Client, name: string, args: Record<string, un
     return r.isError === true;
   } catch {
     return true;
+  }
+}
+
+/** The error text of a failing call — whether it throws (schema validation) or
+ *  resolves with isError (handler-level). Used to assert friendly messages. */
+async function isToolErrorWithMessage(
+  client: Client,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  try {
+    const r = (await client.callTool({ name, arguments: args })) as CallToolResult;
+    if (r.isError) return textOf(r);
+    throw new Error(`expected ${name} to fail, but it succeeded`);
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -105,6 +122,89 @@ describe("MCP server (in-memory transport)", () => {
       await isToolError(client, "add_expense", { amount: 5, category: "x", date: "07/24/2026" }),
     ).toBe(true);
     expect(await isToolError(client, "get_expense", { id: "does-not-exist" })).toBe(true);
+  });
+
+  it("coerces string amounts, including comma-grouped and symbol-prefixed", async () => {
+    const plain = await call(client, "add_expense", {
+      amount: "12.50",
+      category: "food",
+      date: "2026-07-10",
+    });
+    expect(plain.isError).toBeFalsy();
+    expect(jsonOf(plain).amount).toBe(12.5);
+
+    const grouped = await call(client, "add_expense", {
+      amount: "1,234.56",
+      category: "rent",
+      date: "2026-07-11",
+    });
+    expect(grouped.isError).toBeFalsy();
+    expect(jsonOf(grouped).amount).toBe(1234.56);
+
+    const symbol = await call(client, "add_expense", {
+      amount: "$45",
+      category: "food",
+      date: "2026-07-12",
+    });
+    expect(symbol.isError).toBeFalsy();
+    expect(jsonOf(symbol).amount).toBe(45);
+
+    // Coercion also applies inside batch and budget tools.
+    const batch = await call(client, "add_expenses", {
+      expenses: [{ amount: "1,000", category: "shopping", date: "2026-07-13" }],
+    });
+    expect(jsonOf(batch)[0].amount).toBe(1000);
+
+    const budget = await call(client, "set_budget", { amount: "2,500", category: "food" });
+    expect(budget.isError).toBeFalsy();
+    expect(textOf(budget)).toContain("$2,500.00");
+  });
+
+  it("gives friendly messages for missing and non-numeric amounts", async () => {
+    const nonNumeric = await isToolErrorWithMessage(client, "add_expense", {
+      amount: "abc",
+      category: "food",
+    });
+    expect(nonNumeric).toContain("Amount must be a number");
+
+    const missing = await isToolErrorWithMessage(client, "add_expense", { category: "food" });
+    expect(missing).toContain("Amount is required");
+
+    const negative = await isToolErrorWithMessage(client, "add_expense", {
+      amount: -5,
+      category: "food",
+    });
+    expect(negative).toContain("greater than 0");
+  });
+
+  it("renders empty-description rows without a dangling gap", async () => {
+    const created = await call(client, "add_expense", { amount: 30, category: "food", date: "2026-07-10" });
+    const id = jsonOf(created).id;
+    const listed = textOf(await call(client, "list_expenses", {}));
+    const line = listed.split("\n").find((l) => l.includes(id))!;
+    expect(line).toContain(`[food]  (${id})`); // single separator, no empty note slot
+    expect(line).not.toMatch(/\[food]\s{3,}/);
+  });
+
+  it("resolves the most recent expense, overall and by category", async () => {
+    await call(client, "add_expense", { amount: 10, category: "food", date: "2026-07-01" });
+    await call(client, "add_expense", { amount: 20, category: "transport", date: "2026-07-05" });
+    await call(client, "add_expense", { amount: 30, category: "food", date: "2026-07-03" });
+
+    const overall = await call(client, "get_recent_expense", {});
+    expect(overall.isError).toBeFalsy();
+    expect(jsonOf(overall).amount).toBe(20); // 2026-07-05 is newest
+
+    const recentFood = await call(client, "get_recent_expense", { category: "food" });
+    expect(jsonOf(recentFood).amount).toBe(30); // newest food is 2026-07-03
+
+    // The resolved id round-trips into update_expense.
+    const id = jsonOf(recentFood).id;
+    const updated = await call(client, "update_expense", { id, amount: 99 });
+    expect(jsonOf(updated).amount).toBe(99);
+
+    const empty = await call(client, "get_recent_expense", { category: "rent" });
+    expect(empty.isError).toBe(true);
   });
 
   it("lists and filters expenses", async () => {

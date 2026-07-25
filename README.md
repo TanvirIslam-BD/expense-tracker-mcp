@@ -41,6 +41,7 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
 | `add_expenses` | Record many expenses in one call (batch — efficient for receipts / a day's spending) |
 | `list_expenses` | List expenses, newest first, with category / date-range / free-text (`search`) filters |
 | `get_expense` | Fetch one expense by id |
+| `get_recent_expense` | Resolve "my last expense" / "that one" → the most recent expense (optionally by category) |
 | `update_expense` | Update fields of an existing expense |
 | `delete_expense` | Delete an expense by id |
 | `summarize_expenses` | Totals grouped by `category` or `month`, over an optional range |

@@ -37,6 +37,35 @@ function jsonBlock(obj: unknown): string {
   return "```json\n" + JSON.stringify(obj, null, 2) + "\n```";
 }
 
+/**
+ * A monetary amount in major units. Liberal in what it accepts: a real number,
+ * or a string like "12.50" or "1,234.56" (commas, whitespace, and a leading
+ * currency symbol are stripped before parsing). A well-behaved LLM client sends
+ * a number, but scripts — or the occasional model slip on comma-grouped values —
+ * send strings, so we coerce rather than reject. Bad input gets a friendly,
+ * human-readable message instead of a raw type error.
+ */
+function moneyAmount(describe = "Amount in major units, e.g. 12.50") {
+  return z
+    .preprocess((v) => {
+      if (typeof v === "string") {
+        const cleaned = v.replace(/[,\s$£€]/g, "");
+        if (cleaned === "") return undefined; // empty → trigger "required"
+        const n = Number(cleaned);
+        return Number.isNaN(n) ? v : n; // keep original so invalid_type fires
+      }
+      return v;
+    }, z
+      .number({
+        required_error:
+          "Amount is required — give a positive number in major units, e.g. 12.50.",
+        invalid_type_error:
+          "Amount must be a number in major units, e.g. 12.50.",
+      })
+      .positive("Amount must be greater than 0."))
+    .describe(describe);
+}
+
 /** Sum minor units grouped by currency (expenses may mix currencies). */
 function totalsByCurrency(items: { amountMinor: number; currency: string }[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -85,7 +114,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Record a new expense. Amount is a positive decimal in major units " +
         "(e.g. 12.50). Date defaults to today.",
       inputSchema: {
-        amount: z.number().positive().describe("Amount in major units, e.g. 12.50"),
+        amount: moneyAmount(),
         category: z
           .string()
           .min(1)
@@ -140,7 +169,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         expenses: z
           .array(
             z.object({
-              amount: z.number().positive().describe("Amount in major units"),
+              amount: moneyAmount("Amount in major units"),
               category: z
                 .string()
                 .min(1)
@@ -214,12 +243,13 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       const items = await store.listExpenses(userId, { category, search, from, to, limit });
       if (items.length === 0) return text("No expenses found for that filter.");
 
-      const lines = items.map(
-        (e) =>
+      const lines = items.map((e) => {
+        const note = e.description ? `  ${e.description}` : "";
+        return (
           `• ${e.date}  ${formatMoney(e.amountMinor, e.currency).padStart(10)}  ` +
-          `[${e.category}]  ${e.description}`.trimEnd() +
-          `  (${e.id})`,
-      );
+          `[${e.category}]${note}  (${e.id})`
+        );
+      });
       const totals = totalsByCurrency(items);
 
       return text(
@@ -246,6 +276,39 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
   );
 
   server.registerTool(
+    "get_recent_expense",
+    {
+      title: "Get most recent expense",
+      description:
+        "Fetch the single most recently dated expense (optionally within a " +
+        "category). Use this to resolve references like \"my last expense\" or " +
+        "\"that coffee I just added\" into a concrete id you can then pass to " +
+        "update_expense or delete_expense.",
+      inputSchema: {
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Optional: only consider expenses in this category"),
+      },
+    },
+    async ({ category }) => {
+      const [expense] = await store.listExpenses(userId, { category, limit: 1 });
+      if (!expense) {
+        return category
+          ? fail(`No expenses found in category "${category}".`)
+          : fail("No expenses recorded yet.");
+      }
+      return text(
+        `Most recent${category ? ` "${category}"` : ""} expense: ` +
+          `${formatMoney(expense.amountMinor, expense.currency)} on ${expense.date}.\n` +
+          `ID: ${expense.id}\n\n` +
+          jsonBlock(view(expense)),
+      );
+    },
+  );
+
+  server.registerTool(
     "update_expense",
     {
       title: "Update expense",
@@ -253,7 +316,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Update fields of an existing expense. Only provided fields change.",
       inputSchema: {
         id: z.string().min(1).describe("Expense id"),
-        amount: z.number().positive().optional(),
+        amount: moneyAmount("New amount in major units").optional(),
         category: z.string().min(1).optional(),
         description: z.string().optional(),
         date: z.string().optional().describe("YYYY-MM-DD"),
@@ -380,7 +443,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "category for a per-category budget. Re-setting overwrites the existing " +
         "budget for that category.",
       inputSchema: {
-        amount: z.number().positive().describe("Monthly limit in major units"),
+        amount: moneyAmount("Monthly limit in major units"),
         category: z
           .string()
           .min(1)

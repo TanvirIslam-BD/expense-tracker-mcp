@@ -71,8 +71,9 @@ sessions).
 `buildServer(store, userId)` registers everything. Tools return human-readable
 text plus a fenced ```json block with structured data (tests parse that block).
 
-**Tools (13):** `add_expense`, `add_expenses` (batch), `list_expenses`
-(category / date-range / free-text `search`), `get_expense`, `update_expense`,
+**Tools (14):** `add_expense`, `add_expenses` (batch), `list_expenses`
+(category / date-range / free-text `search`), `get_expense`,
+`get_recent_expense` (resolve "my last expense"), `update_expense`,
 `delete_expense`, `summarize_expenses` (by category or month), `set_budget`,
 `list_budgets`, `delete_budget`, `get_budget_status`, `list_categories`,
 `export_expenses` (CSV/JSON).
