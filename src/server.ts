@@ -21,11 +21,14 @@ const DEFAULT_CURRENCY = (process.env.DEFAULT_CURRENCY || "USD")
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 };
 
-function text(s: string): ToolResult {
-  return { content: [{ type: "text", text: s }] };
+function text(s: string, structuredContent?: object): ToolResult {
+  return structuredContent
+    ? { content: [{ type: "text", text: s }], structuredContent: structuredContent as Record<string, unknown> }
+    : { content: [{ type: "text", text: s }] };
 }
 
 function fail(s: string): ToolResult {
@@ -191,6 +194,97 @@ const TOOL_INPUTS = {
   },
 };
 
+/** Shape of the client-facing expense view (see util.ts `view()`). */
+const expenseViewShape = {
+  id: z.string(),
+  date: z.string(),
+  category: z.string(),
+  description: z.string(),
+  amount: z.number(),
+  currency: z.string(),
+};
+
+/** Money totals grouped by ISO-4217 currency code, in major units. */
+const currencyTotalsShape = z.record(z.string(), z.number());
+
+/**
+ * Tool output schemas, hoisted for the same reason as TOOL_INPUTS. Each
+ * matches the `structuredContent` a handler actually returns, so clients that
+ * want structured data don't have to parse the human-readable text/JSON block.
+ */
+const TOOL_OUTPUTS = {
+  add_expense: expenseViewShape,
+  add_expenses: {
+    count: z.number(),
+    totals: currencyTotalsShape,
+    expenses: z.array(z.object(expenseViewShape)),
+  },
+  list_expenses: {
+    count: z.number(),
+    totals: currencyTotalsShape,
+    expenses: z.array(z.object(expenseViewShape)),
+  },
+  get_expense: expenseViewShape,
+  get_recent_expense: expenseViewShape,
+  update_expense: expenseViewShape,
+  delete_expense: {
+    deleted: z.boolean(),
+    id: z.string(),
+  },
+  summarize_expenses: {
+    group_by: z.enum(["category", "month"]),
+    range: z.object({ from: z.string().nullable(), to: z.string().nullable() }),
+    overall_total: currencyTotalsShape,
+    groups: z.array(
+      z.object({ key: z.string(), count: z.number(), totals: currencyTotalsShape }),
+    ),
+  },
+  set_budget: {
+    scope: z.string(),
+    amount: z.number(),
+    currency: z.string(),
+  },
+  list_budgets: {
+    budgets: z.array(
+      z.object({
+        scope: z.string(),
+        amount: z.number(),
+        currency: z.string(),
+        period: z.literal("monthly"),
+      }),
+    ),
+  },
+  delete_budget: {
+    deleted: z.boolean(),
+    scope: z.string(),
+  },
+  get_budget_status: {
+    month: z.string(),
+    statuses: z.array(
+      z.object({
+        scope: z.string(),
+        currency: z.string(),
+        budget: z.number(),
+        spent: z.number(),
+        remaining: z.number(),
+        percent_used: z.number(),
+        over_budget: z.boolean(),
+      }),
+    ),
+  },
+  list_categories: {
+    categories: z.array(
+      z.object({ category: z.string(), count: z.number(), totals: currencyTotalsShape }),
+    ),
+  },
+  export_expenses: {
+    format: z.enum(["csv", "json"]),
+    count: z.number(),
+    csv: z.string().optional(),
+    expenses: z.array(z.object(expenseViewShape)).optional(),
+  },
+};
+
 /**
  * Build a fully-configured MCP server bound to one store and one user id.
  *
@@ -227,6 +321,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Record a new expense. Amount is a positive decimal in major units " +
         "(e.g. 12.50). Date defaults to today.",
       inputSchema: TOOL_INPUTS.add_expense,
+      outputSchema: TOOL_OUTPUTS.add_expense,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -247,11 +342,13 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         description: note,
         date: d,
       });
+      const viewed = view(expense);
 
       return text(
         `Added ${formatMoney(expense.amountMinor, expense.currency)} for ` +
           `"${expense.category}" on ${expense.date}.\nID: ${expense.id}\n\n` +
-          jsonBlock(view(expense)),
+          jsonBlock(viewed),
+        viewed,
       );
     },
   );
@@ -265,6 +362,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "many line items or logging a whole day's spending at once. Each item " +
         "takes the same fields as add_expense.",
       inputSchema: TOOL_INPUTS.add_expenses,
+      outputSchema: TOOL_OUTPUTS.add_expenses,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -294,9 +392,17 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
 
       const created = await store.addExpenses(prepared);
       const totals = totalsByCurrency(created);
+      const structured = {
+        count: created.length,
+        totals: Object.fromEntries(
+          Object.entries(totals).map(([c, m]) => [c, toMajor(m)]),
+        ),
+        expenses: created.map(view),
+      };
       return text(
         `Added ${created.length} expense(s), total ${renderTotals(totals)}.\n\n` +
           jsonBlock(created.map(view)),
+        structured,
       );
     },
   );
@@ -310,6 +416,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "free-text filters. Use `search` to find expenses by a word in the " +
         "note/description (e.g. \"coffee\") or category.",
       inputSchema: TOOL_INPUTS.list_expenses,
+      outputSchema: TOOL_OUTPUTS.list_expenses,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -322,7 +429,13 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       if (to && !isValidDate(to)) return fail(`Invalid "to" date: ${to}`);
 
       const items = await store.listExpenses(userId, { category, search, from, to, limit });
-      if (items.length === 0) return text("No expenses found for that filter.");
+      if (items.length === 0) {
+        return text("No expenses found for that filter.", {
+          count: 0,
+          totals: {},
+          expenses: [],
+        });
+      }
 
       const lines = items.map((e) => {
         const note = e.description ? `  ${e.description}` : "";
@@ -332,12 +445,20 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         );
       });
       const totals = totalsByCurrency(items);
+      const structured = {
+        count: items.length,
+        totals: Object.fromEntries(
+          Object.entries(totals).map(([c, m]) => [c, toMajor(m)]),
+        ),
+        expenses: items.map(view),
+      };
 
       return text(
         `${items.length} expense(s), total ${renderTotals(totals)}:\n` +
           lines.join("\n") +
           "\n\n" +
           jsonBlock(items.map(view)),
+        structured,
       );
     },
   );
@@ -348,6 +469,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Get expense",
       description: "Fetch a single expense by its id.",
       inputSchema: TOOL_INPUTS.get_expense,
+      outputSchema: TOOL_OUTPUTS.get_expense,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -358,7 +480,8 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     async ({ id }) => {
       const expense = await store.getExpense(userId, id);
       if (!expense) return fail(`No expense found with id ${id}.`);
-      return text(jsonBlock(view(expense)));
+      const viewed = view(expense);
+      return text(jsonBlock(viewed), viewed);
     },
   );
 
@@ -372,6 +495,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "\"that coffee I just added\" into a concrete id you can then pass to " +
         "update_expense or delete_expense.",
       inputSchema: TOOL_INPUTS.get_recent_expense,
+      outputSchema: TOOL_OUTPUTS.get_recent_expense,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -386,11 +510,13 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
           ? fail(`No expenses found in category "${category}".`)
           : fail("No expenses recorded yet.");
       }
+      const viewed = view(expense);
       return text(
         `Most recent${category ? ` "${category}"` : ""} expense: ` +
           `${formatMoney(expense.amountMinor, expense.currency)} on ${expense.date}.\n` +
           `ID: ${expense.id}\n\n` +
-          jsonBlock(view(expense)),
+          jsonBlock(viewed),
+        viewed,
       );
     },
   );
@@ -402,6 +528,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Update fields of an existing expense. Only provided fields change.",
       inputSchema: TOOL_INPUTS.update_expense,
+      outputSchema: TOOL_OUTPUTS.update_expense,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -430,7 +557,8 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       });
       if (!updated) return fail(`No expense found with id ${id}.`);
 
-      return text(`Updated expense ${id}.\n\n` + jsonBlock(view(updated)));
+      const viewed = view(updated);
+      return text(`Updated expense ${id}.\n\n` + jsonBlock(viewed), viewed);
     },
   );
 
@@ -440,6 +568,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Delete expense",
       description: "Delete an expense by its id.",
       inputSchema: TOOL_INPUTS.delete_expense,
+      outputSchema: TOOL_OUTPUTS.delete_expense,
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -450,7 +579,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     async ({ id }) => {
       const removed = await store.deleteExpense(userId, id);
       return removed
-        ? text(`Deleted expense ${id}.`)
+        ? text(`Deleted expense ${id}.`, { deleted: true, id })
         : fail(`No expense found with id ${id}.`);
     },
   );
@@ -463,6 +592,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Aggregate spending grouped by category or by month, within an " +
         "optional date range.",
       inputSchema: TOOL_INPUTS.summarize_expenses,
+      outputSchema: TOOL_OUTPUTS.summarize_expenses,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -477,7 +607,14 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       // Grouping + summing happens in the store (SQL GROUP BY on Turso), so we
       // never pull the full row set back just to fold it in memory here.
       const groups = await store.aggregate(userId, { groupBy: group_by, from, to });
-      if (groups.length === 0) return text("No expenses found for that range.");
+      if (groups.length === 0) {
+        return text("No expenses found for that range.", {
+          group_by,
+          range: { from: from ?? null, to: to ?? null },
+          overall_total: {},
+          groups: [],
+        });
+      }
 
       const rows = groups
         .map((g) => ({
@@ -525,6 +662,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
           lines.join("\n") +
           "\n\n" +
           jsonBlock(structured),
+        structured,
       );
     },
   );
@@ -538,6 +676,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "category for a per-category budget. Re-setting overwrites the existing " +
         "budget for that category.",
       inputSchema: TOOL_INPUTS.set_budget,
+      outputSchema: TOOL_OUTPUTS.set_budget,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -556,6 +695,11 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       return text(
         `Set ${label} monthly budget to ` +
           `${formatMoney(budget.amountMinor, budget.currency)}.`,
+        {
+          scope: budget.category ?? "overall",
+          amount: toMajor(budget.amountMinor),
+          currency: budget.currency,
+        },
       );
     },
   );
@@ -568,6 +712,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "List all monthly budgets you've set — the overall budget and any " +
         "per-category budgets.",
       inputSchema: {},
+      outputSchema: TOOL_OUTPUTS.list_budgets,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -578,7 +723,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     async () => {
       const budgets = await store.listBudgets(userId);
       if (budgets.length === 0) {
-        return text("No budgets set. Use set_budget to create one.");
+        return text("No budgets set. Use set_budget to create one.", { budgets: [] });
       }
       const lines = budgets.map(
         (b) =>
@@ -591,7 +736,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         currency: b.currency,
         period: b.period,
       }));
-      return text(lines.join("\n") + "\n\n" + jsonBlock(structured));
+      return text(lines.join("\n") + "\n\n" + jsonBlock(structured), { budgets: structured });
     },
   );
 
@@ -603,6 +748,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Remove a monthly budget. Omit category to delete the overall budget; " +
         "provide a category to delete that category's budget.",
       inputSchema: TOOL_INPUTS.delete_budget,
+      outputSchema: TOOL_OUTPUTS.delete_budget,
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -617,7 +763,10 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       const label = target ? `"${target}"` : "overall";
       if (!found) return fail(`No ${label} budget to delete.`);
       await store.deleteBudget(userId, found.id);
-      return text(`Deleted ${label} monthly budget.`);
+      return text(`Deleted ${label} monthly budget.`, {
+        deleted: true,
+        scope: target ?? "overall",
+      });
     },
   );
 
@@ -629,6 +778,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         "Compare this month's (or a given month's) spending against your " +
         "budgets. Reports spent, remaining, and over-budget flags.",
       inputSchema: TOOL_INPUTS.get_budget_status,
+      outputSchema: TOOL_OUTPUTS.get_budget_status,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -642,7 +792,10 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
 
       const budgets = await store.listBudgets(userId);
       if (budgets.length === 0) {
-        return text("No budgets set. Use set_budget to create one.");
+        return text("No budgets set. Use set_budget to create one.", {
+          month: m,
+          statuses: [],
+        });
       }
 
       // Scope to the month at the store level (uses the (user_id, date) index)
@@ -697,6 +850,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
 
       return text(
         `Budget status for ${m}:\n` + lines.join("\n") + "\n\n" + jsonBlock(structured),
+        { month: m, statuses: structured },
       );
     },
   );
@@ -708,6 +862,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "List the categories you've used, with expense counts and totals.",
       inputSchema: {},
+      outputSchema: TOOL_OUTPUTS.list_categories,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -719,7 +874,9 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       // Category counts + totals computed in the store (SQL GROUP BY), not by
       // fetching every expense and folding it here.
       const groups = await store.aggregate(userId, { groupBy: "category" });
-      if (groups.length === 0) return text("No expenses recorded yet.");
+      if (groups.length === 0) {
+        return text("No expenses recorded yet.", { categories: [] });
+      }
 
       const rows = groups.sort((a, b) => b.count - a.count);
       const lines = rows.map(
@@ -733,7 +890,9 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         ),
       }));
 
-      return text(lines.join("\n") + "\n\n" + jsonBlock(structured));
+      return text(lines.join("\n") + "\n\n" + jsonBlock(structured), {
+        categories: structured,
+      });
     },
   );
 
@@ -743,6 +902,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Export expenses",
       description: "Export expenses as CSV or JSON, with an optional date range.",
       inputSchema: TOOL_INPUTS.export_expenses,
+      outputSchema: TOOL_OUTPUTS.export_expenses,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -755,10 +915,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       if (to && !isValidDate(to)) return fail(`Invalid "to" date: ${to}`);
 
       const items = (await store.listExpenses(userId, { from, to })).map(view);
-      if (items.length === 0) return text("No expenses to export.");
+      if (items.length === 0) {
+        return text("No expenses to export.", { format, count: 0 });
+      }
 
       if (format === "json") {
-        return text(jsonBlock(items));
+        return text(jsonBlock(items), { format, count: items.length, expenses: items });
       }
 
       const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
@@ -773,7 +935,8 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
           e.currency,
         ].join(","),
       );
-      return text("```csv\n" + [header, ...rows].join("\n") + "\n```");
+      const csv = [header, ...rows].join("\n");
+      return text("```csv\n" + csv + "\n```", { format, count: items.length, csv });
     },
   );
 
