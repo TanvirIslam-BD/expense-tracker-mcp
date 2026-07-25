@@ -264,6 +264,47 @@
     .step .line{display:none;}
     .sec{padding:80px 0;}
   }
+
+  /* ---------- mobile UX pass (≤620px) ---------- */
+  @media(max-width:620px){
+    .wrap{padding:0 18px;}
+    .sec{padding:60px 0;}
+    .hero.sec{padding-top:64px;padding-bottom:60px;}
+    h2{font-size:29px;}
+    .lead{font-size:16px;}
+    /* full-width, thumb-friendly CTAs */
+    .hero .cta{flex-direction:column;gap:10px;}
+    .hero .cta .btn{width:100%;justify-content:center;padding:15px;font-size:15.5px;}
+    .modes{gap:9px;}
+    .mode{font-size:13px;padding:8px 13px;}
+    /* clean demo: drop the chat poster, keep a crisp play button */
+    .videobox .poster{display:none;}
+    .videobox{background:radial-gradient(circle at 50% 45%,#241a3d,#0c0c14);}
+    .playbtn{width:64px;height:64px;}
+    .videobox .ring{width:64px;height:64px;}
+    /* live-example + confirmation cards a touch tighter */
+    .chat{padding:16px;border-radius:18px;}
+    .brow{grid-template-columns:66px 1fr 54px;font-size:12px;}
+    /* pricing card padding */
+    .price{padding:26px 22px;}
+    /* footer stacks left-aligned */
+    footer .wrap{flex-direction:column;gap:26px;}
+    footer .cols{gap:34px;}
+    /* final CTA keeps buttons stacked full width */
+    .finalcta{padding:48px 20px;}
+    .finalcta .cta{flex-direction:column;gap:10px;width:100%;}
+    .finalcta .cta .btn{width:100%;justify-content:center;}
+  }
+
+  /* sticky mobile CTA bar — persistent, thumb-reachable */
+  .mcta{display:none;}
+  @media(max-width:820px){
+    body{padding-bottom:72px;}
+    .mcta{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;gap:10px;padding:10px 14px;
+      background:rgba(10,10,15,.94);backdrop-filter:blur(16px);border-top:1px solid var(--line2);
+      box-shadow:0 -8px 30px -12px rgba(0,0,0,.7);}
+    .mcta .btn{flex:1;justify-content:center;padding:13px;font-size:14.5px;}
+  }
 </style>
 </head>
 <body>
@@ -529,6 +570,12 @@
     </div>
   </div>
 </section>
+
+<!-- STICKY MOBILE CTA -->
+<div class="mcta">
+  <a class="btn btn-primary" href="#"><svg class="blogo" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c.5 4.5 3.5 7.5 8 8-4.5.5-7.5 3.5-8 8-.5-4.5-3.5-7.5-8-8 4.5-.5 7.5-3.5 8-8z"/></svg>Add to Claude</a>
+  <a class="btn btn-alt" href="#"><svg class="blogo" viewBox="0 0 24 24" fill="#0a0a0f"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4.4" fill="#fff"/></svg>Add to ChatGPT</a>
+</div>
 
 <!-- FOOTER -->
 <footer>
