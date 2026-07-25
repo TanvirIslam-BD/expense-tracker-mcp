@@ -18,13 +18,35 @@ Cursor, VS Code, or any MCP client. Each subscriber's data is isolated automatic
   <img src="./assets/screenshot-11-claude-desktop.png" alt="Spending report in the Claude desktop app" width="420">
 </p>
 
-> 🎨 **New light-theme UI mockups.** A polished, self-contained marketing set —
-> Claude + ChatGPT pairs across mobile *add / receipt / budget / report* and a
-> desktop dashboard — lives in [`assets/marketing/marketing-kit.html`](./assets/marketing/marketing-kit.html)
-> (plus a standalone spending-report chart in
-> [`assets/marketing-claude-mobile-light.html`](./assets/marketing-claude-mobile-light.html)).
-> Open either file in a browser to view or screenshot each screen at full
-> resolution.
+### Light-theme UI — the same flows in Claude and ChatGPT
+
+Log an expense in plain language, or drop in a receipt photo:
+
+<p align="center">
+  <img src="./assets/marketing/claude-add.png" alt="Logging an expense by natural language in Claude" width="230">
+  <img src="./assets/marketing/chatgpt-add.png" alt="Logging an expense by natural language in ChatGPT" width="230">
+  <img src="./assets/marketing/claude-receipt.png" alt="Logging an expense from a receipt photo in Claude" width="230">
+  <img src="./assets/marketing/chatgpt-receipt.png" alt="Logging an expense from a receipt photo in ChatGPT" width="230">
+</p>
+
+Track budgets and get a spending report on demand:
+
+<p align="center">
+  <img src="./assets/marketing/claude-budget.png" alt="Monthly budget status in Claude" width="230">
+  <img src="./assets/marketing/chatgpt-budget.png" alt="Monthly budget status in ChatGPT" width="230">
+  <img src="./assets/marketing/claude-report.png" alt="Spending-by-category report in Claude" width="230">
+  <img src="./assets/marketing/chatgpt-report.png" alt="Spending-by-category report in ChatGPT" width="230">
+</p>
+
+And a desktop dashboard view:
+
+<p align="center">
+  <img src="./assets/marketing/claude-desktop.png" alt="Expense tracker desktop dashboard (Claude)" width="440">
+  <img src="./assets/marketing/chatgpt-desktop.png" alt="Expense tracker desktop dashboard (ChatGPT)" width="440">
+</p>
+
+> These mockups are generated from [`assets/marketing/marketing-kit.html`](./assets/marketing/marketing-kit.html)
+> — open it with `?shot=<name>` (e.g. `?shot=claude-report`) to re-export any screen.
 
 > Receipt photos are read by the host model's vision capability (Claude/ChatGPT) —
 > the server itself only receives the already-extracted amount, category, vendor,

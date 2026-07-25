@@ -17,6 +17,8 @@
   html,body{margin:0;padding:0;background:#e7e2d9;
     font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);}
   .page{padding:34px;display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start;}
+  body.single{background:transparent;}
+  body.single .page{padding:30px;display:inline-block;}
   .shot{display:flex;flex-direction:column;gap:10px;}
   .shot .cap{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6b6b64;}
 
@@ -268,22 +270,29 @@ function desktop(b){
 
 /* ---------------- render ---------------- */
 const shots=[
-  ['Claude · mobile · add',       ()=>addShot(BRANDS.claude)],
-  ['ChatGPT · mobile · add',      ()=>addShot(BRANDS.chatgpt)],
-  ['Claude · mobile · receipt',   ()=>receiptShot(BRANDS.claude)],
-  ['ChatGPT · mobile · receipt',  ()=>receiptShot(BRANDS.chatgpt)],
-  ['Claude · mobile · budget',    ()=>budgetShot(BRANDS.claude)],
-  ['ChatGPT · mobile · budget',   ()=>budgetShot(BRANDS.chatgpt)],
-  ['Claude · mobile · report',    ()=>reportShot(BRANDS.claude)],
-  ['ChatGPT · mobile · report',   ()=>reportShot(BRANDS.chatgpt)],
-  ['Claude · desktop',            ()=>desktop(BRANDS.claude)],
-  ['ChatGPT · desktop',           ()=>desktop(BRANDS.chatgpt)],
+  ['claude-add',      'Claude · mobile · add',      ()=>addShot(BRANDS.claude)],
+  ['chatgpt-add',     'ChatGPT · mobile · add',     ()=>addShot(BRANDS.chatgpt)],
+  ['claude-receipt',  'Claude · mobile · receipt',  ()=>receiptShot(BRANDS.claude)],
+  ['chatgpt-receipt', 'ChatGPT · mobile · receipt', ()=>receiptShot(BRANDS.chatgpt)],
+  ['claude-budget',   'Claude · mobile · budget',   ()=>budgetShot(BRANDS.claude)],
+  ['chatgpt-budget',  'ChatGPT · mobile · budget',  ()=>budgetShot(BRANDS.chatgpt)],
+  ['claude-report',   'Claude · mobile · report',   ()=>reportShot(BRANDS.claude)],
+  ['chatgpt-report',  'ChatGPT · mobile · report',  ()=>reportShot(BRANDS.chatgpt)],
+  ['claude-desktop',  'Claude · desktop',           ()=>desktop(BRANDS.claude)],
+  ['chatgpt-desktop', 'ChatGPT · desktop',          ()=>desktop(BRANDS.chatgpt)],
 ];
 const page=document.getElementById('page');
-for(const [cap,fn] of shots){
-  const s=document.createElement('div'); s.className='shot';
-  s.innerHTML=`<div class="cap">${cap}</div>${fn()}`;
-  page.appendChild(s);
+const only=new URLSearchParams(location.search).get('shot');
+if(only){
+  // Single-shot export mode: render one mockup bare, tight to its bounds.
+  const hit=shots.find(s=>s[0]===only);
+  if(hit){ document.body.classList.add('single'); page.innerHTML=hit[2](); }
+} else {
+  for(const [id,cap,fn] of shots){
+    const s=document.createElement('div'); s.className='shot';
+    s.innerHTML=`<div class="cap">${cap}</div>${fn()}`;
+    page.appendChild(s);
+  }
 }
 /* charts */
 const DATA=[["Travel",19700],["Shopping",10850],["Transport",4830],["Utilities",4350],["Food",3980],["Gift",2500],["Bills",1850],["Health",1850],["Education",1800],["Entertainment",1099],["Misc",1000],["Office",720]];
