@@ -14,9 +14,12 @@
   .claude{ --accent:#cc7a52; --model:"Sonnet 5"; }
   .chatgpt{ --accent:#10a37f; --model:"GPT-5"; }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:#e7e2d9;
+  html{margin:0;padding:0;}
+  body{margin:0;padding:0;background:#e7e2d9;
     font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);}
   .page{padding:34px;display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start;}
+  /* single-shot export: transparent canvas (html + body) so PNGs have no backdrop */
+  html:has(body.single){background:transparent;}
   body.single{background:transparent;}
   body.single .page{padding:30px;display:inline-block;}
   .shot{display:flex;flex-direction:column;gap:10px;}
