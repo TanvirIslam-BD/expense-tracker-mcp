@@ -300,11 +300,13 @@
   /* sticky mobile CTA bar — persistent, thumb-reachable */
   .mcta{display:none;}
   @media(max-width:820px){
-    body{padding-bottom:72px;}
-    .mcta{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;gap:10px;padding:10px 14px;
-      background:rgba(10,10,15,.94);backdrop-filter:blur(16px);border-top:1px solid var(--line2);
-      box-shadow:0 -8px 30px -12px rgba(0,0,0,.7);}
-    .mcta .btn{flex:1;justify-content:center;padding:13px;font-size:14.5px;}
+    body{padding-bottom:76px;}
+    .mcta{display:flex;justify-content:center;position:fixed;left:0;right:auto;bottom:0;width:100%;z-index:60;
+      padding:10px 14px;background:rgba(10,10,15,.94);backdrop-filter:blur(16px);
+      border-top:1px solid var(--line2);box-shadow:0 -8px 30px -12px rgba(0,0,0,.7);}
+    .mcta .inner{display:flex;gap:10px;width:100%;max-width:560px;}
+    .mcta .btn{flex:1 1 0;min-width:0;justify-content:center;padding:13px 10px;font-size:14.5px;
+      overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
   }
 </style>
 </head>
@@ -574,8 +576,10 @@
 
 <!-- STICKY MOBILE CTA -->
 <div class="mcta">
-  <a class="btn btn-primary" href="#"><svg class="blogo" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c.5 4.5 3.5 7.5 8 8-4.5.5-7.5 3.5-8 8-.5-4.5-3.5-7.5-8-8 4.5-.5 7.5-3.5 8-8z"/></svg>Add to Claude</a>
-  <a class="btn btn-alt" href="#"><svg class="blogo" viewBox="0 0 24 24" fill="#0a0a0f"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4.4" fill="#fff"/></svg>Add to ChatGPT</a>
+  <div class="inner">
+    <a class="btn btn-primary" href="#"><svg class="blogo" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c.5 4.5 3.5 7.5 8 8-4.5.5-7.5 3.5-8 8-.5-4.5-3.5-7.5-8-8 4.5-.5 7.5-3.5 8-8z"/></svg>Add to Claude</a>
+    <a class="btn btn-alt" href="#"><svg class="blogo" viewBox="0 0 24 24" fill="#0a0a0f"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4.4" fill="#fff"/></svg>Add to ChatGPT</a>
+  </div>
 </div>
 
 <!-- FOOTER -->
@@ -633,6 +637,12 @@
     navlinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+cur));
   };
   window.addEventListener('scroll',onScroll,{passive:true});onScroll();
+
+  // pin the sticky CTA bar to the LAYOUT width (guards against environments where
+  // the visual viewport is wider than the layout column, e.g. narrow-column previews)
+  const mcta=document.querySelector('.mcta');
+  const syncMcta=()=>{ if(mcta) mcta.style.width=document.documentElement.clientWidth+'px'; };
+  window.addEventListener('resize',syncMcta);window.addEventListener('orientationchange',syncMcta);syncMcta();
 </script>
 </body>
 </html>
