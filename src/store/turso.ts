@@ -190,33 +190,31 @@ export class TursoStore implements ExpenseStore {
     id: string,
     patch: ExpensePatch,
   ): Promise<Expense | null> {
-    const existing = await this.getExpense(userId, id);
-    if (!existing) return null;
-
-    const updated: Expense = {
-      ...existing,
-      amountMinor: patch.amountMinor ?? existing.amountMinor,
-      currency: patch.currency ?? existing.currency,
-      category: patch.category ?? existing.category,
-      description: patch.description ?? existing.description,
-      date: patch.date ?? existing.date,
-    };
-
-    await this.client.execute({
-      sql: `UPDATE expenses
-            SET amount_minor = ?, currency = ?, category = ?, description = ?, date = ?
-            WHERE user_id = ? AND id = ?`,
+    // Single round trip: COALESCE keeps any field the caller omitted (passed as
+    // NULL), and RETURNING hands back the updated row — so we skip the separate
+    // SELECT-then-UPDATE that doubled latency on remote (cross-region) Turso.
+    const r = await this.client.execute({
+      sql: `UPDATE expenses SET
+              amount_minor = COALESCE(?, amount_minor),
+              currency     = COALESCE(?, currency),
+              category     = COALESCE(?, category),
+              description  = COALESCE(?, description),
+              date         = COALESCE(?, date)
+            WHERE user_id = ? AND id = ?
+            RETURNING *`,
       args: [
-        updated.amountMinor,
-        updated.currency,
-        updated.category,
-        updated.description,
-        updated.date,
+        patch.amountMinor ?? null,
+        patch.currency ?? null,
+        patch.category ?? null,
+        patch.description ?? null,
+        patch.date ?? null,
         userId,
         id,
       ],
     });
-    return updated;
+    return r.rows.length
+      ? this.rowToExpense(r.rows[0] as unknown as Record<string, unknown>)
+      : null;
   }
 
   async deleteExpense(userId: string, id: string): Promise<boolean> {

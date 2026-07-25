@@ -165,8 +165,10 @@ issues short-lived/rotating tokens — you'll silently fragment every user's dat
 across per-request buckets. Key on the platform's explicit stable user-id header
 (`x-mcpize-user-id` here), and fail closed when no stable identity exists.
 
-> Temporary per-request diagnostic logging lives in `src/index.ts` (the `[req] …`
-> line). Remove it once isolation is confirmed working in production.
+> Per-request diagnostic logging lives in `src/index.ts` (the `[req] …` /
+> `[req-done] ms=…` lines) and is **opt-in**: set `LOG_REQUESTS=1` to enable it
+> (e.g. when comparing Turso region latency). Off by default so production stays
+> quiet and skips the per-request logging work.
 
 ---
 
