@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MemoryStore } from "../src/store/memory.js";
-import type { NewExpense } from "../src/store/types.js";
+import type { NewExpense, NewIncome, NewRecurringExpense } from "../src/store/types.js";
 
 function expense(over: Partial<NewExpense> = {}): NewExpense {
   return {
@@ -13,6 +13,31 @@ function expense(over: Partial<NewExpense> = {}): NewExpense {
     category: "food",
     description: "",
     date: "2026-07-10",
+    ...over,
+  };
+}
+
+function income(over: Partial<NewIncome> = {}): NewIncome {
+  return {
+    userId: "alice",
+    amountMinor: 250000,
+    currency: "USD",
+    source: "salary",
+    description: "",
+    date: "2026-07-01",
+    ...over,
+  };
+}
+
+function recurring(over: Partial<NewRecurringExpense> = {}): NewRecurringExpense {
+  return {
+    userId: "alice",
+    amountMinor: 1500,
+    currency: "USD",
+    category: "subscription",
+    description: "",
+    frequency: "monthly",
+    nextDate: "2026-07-01",
     ...over,
   };
 }
@@ -141,6 +166,127 @@ describe("MemoryStore — budgets", () => {
   it("isolates budgets between users", async () => {
     await store.setBudget({ userId: "alice", category: null, amountMinor: 100, currency: "USD" });
     expect((await store.listBudgets("bob")).length).toBe(0);
+  });
+});
+
+describe("MemoryStore — income", () => {
+  let store: MemoryStore;
+
+  beforeEach(async () => {
+    store = new MemoryStore();
+    await store.init();
+  });
+
+  it("adds income with a generated id and createdAt", async () => {
+    const i = await store.addIncome(income());
+    expect(i.id).toBeTruthy();
+    expect(await store.getIncome("alice", i.id)).toEqual(i);
+  });
+
+  it("lists newest first and filters by date range and search", async () => {
+    await store.addIncome(income({ date: "2026-07-01", source: "salary" }));
+    await store.addIncome(
+      income({ date: "2026-07-15", source: "freelance", description: "logo design" }),
+    );
+
+    const list = await store.listIncome("alice");
+    expect(list.map((i) => i.source)).toEqual(["freelance", "salary"]);
+    expect((await store.listIncome("alice", { search: "logo" })).length).toBe(1);
+    expect((await store.listIncome("alice", { from: "2026-07-10" })).length).toBe(1);
+  });
+
+  it("updates only the provided fields and deletes", async () => {
+    const i = await store.addIncome(income());
+    const updated = await store.updateIncome("alice", i.id, { amountMinor: 300000 });
+    expect(updated?.amountMinor).toBe(300000);
+    expect(updated?.source).toBe("salary"); // untouched
+
+    expect(await store.deleteIncome("alice", i.id)).toBe(true);
+    expect(await store.deleteIncome("alice", i.id)).toBe(false);
+    expect(await store.getIncome("alice", i.id)).toBeNull();
+  });
+
+  it("isolates income between users", async () => {
+    await store.addIncome(income({ userId: "alice" }));
+    await store.addIncome(income({ userId: "bob" }));
+    expect((await store.listIncome("alice")).length).toBe(1);
+    expect((await store.listIncome("bob")).length).toBe(1);
+  });
+});
+
+describe("MemoryStore — recurring expenses", () => {
+  let store: MemoryStore;
+
+  beforeEach(async () => {
+    store = new MemoryStore();
+    await store.init();
+  });
+
+  it("defaults to active when not specified", async () => {
+    const r = await store.addRecurringExpense(recurring());
+    expect(r.active).toBe(true);
+    expect((await store.listRecurringExpenses("alice")).length).toBe(1);
+  });
+
+  it("materializes a single due occurrence and advances nextDate", async () => {
+    await store.addRecurringExpense(recurring({ nextDate: "2026-07-01" }));
+    const created = await store.processDueRecurring("alice", "2026-07-15");
+    expect(created.length).toBe(1);
+    expect(created[0].date).toBe("2026-07-01");
+    expect((await store.listExpenses("alice")).length).toBe(1);
+
+    const [r] = await store.listRecurringExpenses("alice");
+    expect(r.nextDate).toBe("2026-08-01");
+
+    // Same day again is a no-op: already caught up.
+    expect(await store.processDueRecurring("alice", "2026-07-15")).toEqual([]);
+  });
+
+  it("catches up multiple missed occurrences in one pass", async () => {
+    await store.addRecurringExpense(
+      recurring({ frequency: "weekly", nextDate: "2026-06-01" }),
+    );
+    const created = await store.processDueRecurring("alice", "2026-06-22");
+    // weekly: 06-01, 06-08, 06-15, 06-22 -> 4 occurrences.
+    expect(created.length).toBe(4);
+    expect(created.map((e) => e.date)).toEqual([
+      "2026-06-01",
+      "2026-06-08",
+      "2026-06-15",
+      "2026-06-22",
+    ]);
+  });
+
+  it("skips paused recurring expenses until resumed", async () => {
+    const r = await store.addRecurringExpense(recurring({ active: false }));
+    expect(await store.processDueRecurring("alice", "2026-07-15")).toEqual([]);
+
+    await store.updateRecurringExpense("alice", r.id, { active: true });
+    expect((await store.processDueRecurring("alice", "2026-07-15")).length).toBe(1);
+  });
+
+  it("updates only the provided fields", async () => {
+    const r = await store.addRecurringExpense(recurring());
+    const updated = await store.updateRecurringExpense("alice", r.id, { amountMinor: 5000 });
+    expect(updated?.amountMinor).toBe(5000);
+    expect(updated?.category).toBe("subscription"); // untouched
+    expect(await store.updateRecurringExpense("alice", "missing", { amountMinor: 1 })).toBeNull();
+  });
+
+  it("deletes and reports whether anything was removed", async () => {
+    const r = await store.addRecurringExpense(recurring());
+    expect(await store.deleteRecurringExpense("alice", r.id)).toBe(true);
+    expect(await store.deleteRecurringExpense("alice", r.id)).toBe(false);
+    expect((await store.listRecurringExpenses("alice")).length).toBe(0);
+  });
+
+  it("isolates recurring expenses between users", async () => {
+    await store.addRecurringExpense(recurring({ userId: "alice" }));
+    await store.addRecurringExpense(recurring({ userId: "bob" }));
+    expect((await store.listRecurringExpenses("alice")).length).toBe(1);
+    // processDueRecurring only ever touches the requesting user's schedules.
+    await store.processDueRecurring("alice", "2026-12-31");
+    expect((await store.listExpenses("bob")).length).toBe(0);
   });
 });
 

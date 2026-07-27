@@ -76,6 +76,22 @@ And a desktop dashboard view:
 | `get_budget_status` | Spend vs. budget for a month, with over-budget flags |
 | `list_categories` | Categories used, with counts and totals |
 | `export_expenses` | Export as CSV or JSON |
+| `add_income` | Record an income entry (`amount`, `source`, `description?`, `date?`, `currency?`) |
+| `list_income` | List income entries, newest first, with date-range / free-text filters |
+| `get_income` | Fetch one income entry by id |
+| `update_income` | Update fields of an existing income entry |
+| `delete_income` | Delete an income entry by id |
+| `get_cash_flow` | Income vs. expenses over a range (defaults to the current month), with the net |
+| `add_recurring_expense` | Schedule an expense that repeats (`daily`/`weekly`/`monthly`/`yearly`) — e.g. rent, subscriptions |
+| `list_recurring_expenses` | List recurring expenses (active and paused) with their next occurrence |
+| `update_recurring_expense` | Update a recurring expense's amount/category/schedule, or pause/resume it |
+| `delete_recurring_expense` | Remove a recurring expense (already-logged occurrences are unaffected) |
+| `process_recurring_expenses` | Immediately log any due recurring occurrences instead of waiting for the next automatic check |
+| `get_spending_trends` | This month vs. trailing average, overall and by category, with spike flags |
+
+Due recurring expenses are also caught up automatically whenever `list_expenses`
+or `get_budget_status` runs — there's no background cron in this stateless
+deployment, so materialization happens lazily on the next relevant request.
 
 **Resources:** `expense://recent` (last 20), `expense://summary/current-month`
 **Prompts:** `monthly_report`, `budget_review`
