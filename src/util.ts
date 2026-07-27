@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { Request } from "express";
-import type { Expense } from "./store/types.js";
+import type { Expense, Income, RecurringExpense, RecurringFrequency } from "./store/types.js";
 
 // ---------------------------------------------------------------------------
 // Identifiers
@@ -66,6 +66,34 @@ export function isValidDate(s: string): boolean {
 
 export function isValidMonth(s: string): boolean {
   return MONTH_RE.test(s);
+}
+
+/** Shift a YYYY-MM month string by `delta` months (may be negative). */
+export function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The next calendar date, YYYY-MM-DD, after `dateISO` at the given frequency. */
+export function nextOccurrence(dateISO: string, frequency: RecurringFrequency): string {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  switch (frequency) {
+    case "daily":
+      date.setUTCDate(date.getUTCDate() + 1);
+      break;
+    case "weekly":
+      date.setUTCDate(date.getUTCDate() + 7);
+      break;
+    case "monthly":
+      date.setUTCMonth(date.getUTCMonth() + 1);
+      break;
+    case "yearly":
+      date.setUTCFullYear(date.getUTCFullYear() + 1);
+      break;
+  }
+  return date.toISOString().slice(0, 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -177,5 +205,49 @@ export function view(e: Expense): ExpenseView {
     description: e.description,
     amount: toMajor(e.amountMinor),
     currency: e.currency,
+  };
+}
+
+export interface IncomeView {
+  id: string;
+  date: string;
+  source: string;
+  description: string;
+  amount: number;
+  currency: string;
+}
+
+export function viewIncome(i: Income): IncomeView {
+  return {
+    id: i.id,
+    date: i.date,
+    source: i.source,
+    description: i.description,
+    amount: toMajor(i.amountMinor),
+    currency: i.currency,
+  };
+}
+
+export interface RecurringView {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+  currency: string;
+  frequency: RecurringFrequency;
+  next_date: string;
+  active: boolean;
+}
+
+export function viewRecurring(r: RecurringExpense): RecurringView {
+  return {
+    id: r.id,
+    category: r.category,
+    description: r.description,
+    amount: toMajor(r.amountMinor),
+    currency: r.currency,
+    frequency: r.frequency,
+    next_date: r.nextDate,
+    active: r.active,
   };
 }

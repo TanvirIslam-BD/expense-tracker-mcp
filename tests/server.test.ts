@@ -20,6 +20,18 @@ const TOOL_NAMES = [
   "get_budget_status",
   "list_categories",
   "export_expenses",
+  "add_income",
+  "list_income",
+  "get_income",
+  "update_income",
+  "delete_income",
+  "get_cash_flow",
+  "add_recurring_expense",
+  "list_recurring_expenses",
+  "update_recurring_expense",
+  "delete_recurring_expense",
+  "process_recurring_expenses",
+  "get_spending_trends",
 ];
 
 function textOf(result: CallToolResult): string {
@@ -378,5 +390,131 @@ describe("MCP server (in-memory transport)", () => {
     const body = JSON.parse(res.contents[0].text as string);
     expect(body.month).toMatch(/^\d{4}-\d{2}$/);
     expect(body.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it("records income and reads it back", async () => {
+    const r = await call(client, "add_income", {
+      amount: 2500,
+      source: "Salary",
+      description: "July paycheck",
+      date: "2026-07-01",
+    });
+    expect(r.isError).toBeFalsy();
+    const data = jsonOf(r);
+    expect(data.amount).toBe(2500);
+    expect(data.source).toBe("salary"); // normalised to lowercase
+
+    const listed = jsonOf(await call(client, "list_income", {}));
+    expect(listed.length).toBe(1);
+
+    const fetched = jsonOf(await call(client, "get_income", { id: data.id }));
+    expect(fetched.description).toBe("July paycheck");
+
+    const updated = jsonOf(await call(client, "update_income", { id: data.id, amount: 2600 }));
+    expect(updated.amount).toBe(2600);
+
+    const del = await call(client, "delete_income", { id: data.id });
+    expect(textOf(del)).toContain("Deleted");
+    expect(await isToolError(client, "get_income", { id: data.id })).toBe(true);
+  });
+
+  it("computes cash flow as income minus expenses over a range", async () => {
+    await call(client, "add_income", { amount: 1000, source: "salary", date: "2026-07-01" });
+    await call(client, "add_expense", { amount: 300, category: "rent", date: "2026-07-02" });
+    await call(client, "add_expense", { amount: 50, category: "food", date: "2026-07-03" });
+
+    const r = await call(client, "get_cash_flow", { from: "2026-07-01", to: "2026-07-31" });
+    const data = jsonOf(r);
+    expect(data.income_total.USD).toBe(1000);
+    expect(data.expense_total.USD).toBe(350);
+    expect(data.net.USD).toBe(650);
+  });
+
+  it("schedules a recurring expense and logs due occurrences", async () => {
+    const added = await call(client, "add_recurring_expense", {
+      amount: 15,
+      category: "subscription",
+      description: "Streaming",
+      frequency: "weekly",
+      start_date: "2026-06-01",
+    });
+    expect(added.isError).toBeFalsy();
+    const recurring = jsonOf(added);
+    expect(recurring.active).toBe(true);
+    expect(recurring.next_date).toBe("2026-06-01");
+
+    const processed = await call(client, "process_recurring_expenses", {});
+    // weekly from 2026-06-01 through today (>= 2026-07-27) is many occurrences.
+    const createdCount = jsonOf(processed).length;
+    expect(createdCount).toBeGreaterThan(1);
+    expect(jsonOf(await call(client, "list_expenses", { category: "subscription" })).length).toBe(
+      createdCount,
+    );
+
+    // Nothing left to catch up immediately after.
+    expect(textOf(await call(client, "process_recurring_expenses", {}))).toContain(
+      "No recurring expenses were due",
+    );
+
+    const listed = jsonOf(await call(client, "list_recurring_expenses", {}));
+    expect(listed.length).toBe(1);
+    expect(listed[0].next_date > "2026-07-27").toBe(true);
+  });
+
+  it("pausing a recurring expense stops it from being logged", async () => {
+    const recurring = jsonOf(
+      await call(client, "add_recurring_expense", {
+        amount: 10,
+        category: "gym",
+        frequency: "monthly",
+        start_date: "2026-01-01",
+      }),
+    );
+    await call(client, "update_recurring_expense", { id: recurring.id, active: false });
+    expect(textOf(await call(client, "process_recurring_expenses", {}))).toContain(
+      "No recurring expenses were due",
+    );
+
+    await call(client, "update_recurring_expense", { id: recurring.id, active: true });
+    expect(jsonOf(await call(client, "process_recurring_expenses", {})).length).toBeGreaterThan(0);
+
+    const del = await call(client, "delete_recurring_expense", { id: recurring.id });
+    expect(textOf(del)).toContain("Deleted");
+    expect(await isToolError(client, "delete_recurring_expense", { id: recurring.id })).toBe(true);
+  });
+
+  it("list_expenses auto-catches-up due recurring expenses", async () => {
+    await call(client, "add_recurring_expense", {
+      amount: 20,
+      category: "insurance",
+      frequency: "monthly",
+      start_date: "2026-06-01",
+    });
+    // No explicit process_recurring_expenses call — list_expenses should
+    // materialize it on its own.
+    const listed = jsonOf(await call(client, "list_expenses", { category: "insurance" }));
+    expect(listed.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags a category spending well above its trailing average as a spike", async () => {
+    const now = new Date();
+    const priorMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 5))
+      .toISOString()
+      .slice(0, 10);
+    const thisMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 5))
+      .toISOString()
+      .slice(0, 10);
+
+    await call(client, "add_expense", { amount: 50, category: "shopping", date: priorMonth });
+    await call(client, "add_expense", { amount: 400, category: "shopping", date: thisMonthStart });
+
+    const r = await call(client, "get_spending_trends", { months: 2 });
+    expect(r.isError).toBeFalsy();
+    const data = jsonOf(r);
+    expect(data.overall.length).toBe(2);
+    expect(["up", "down", "flat"]).toContain(data.trend);
+    const spike = data.category_spikes.find((s: any) => s.category === "shopping");
+    expect(spike).toBeTruthy();
+    expect(spike.percent_change).toBeGreaterThan(50);
   });
 });
