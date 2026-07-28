@@ -275,6 +275,25 @@ async function startHttp(): Promise<void> {
     });
   });
 
+  // OAuth-authenticated web dashboards exchange their MCPize access token for
+  // a short-lived dashboard session here. The MCPize gateway injects the
+  // stable user id after validating the bearer token. Do not fall back to a
+  // hash of the bearer token: that could point at a different data namespace.
+  app.get("/dashboard/session", (req: Request, res: Response) => {
+    const dashboardSecret = process.env.DASHBOARD_SESSION_SECRET;
+    const userId = (req.header("x-mcpize-user-id") || req.header("x-mcpize-user") || "").trim();
+    if (!dashboardSecret) {
+      res.status(503).json({ error: "Dashboard sessions are not configured." });
+      return;
+    }
+    if (!userId) {
+      res.status(401).json({ error: "MCPize authentication is required." });
+      return;
+    }
+    res.set("Cache-Control", "private, no-store, max-age=0");
+    res.json({ dashboard_token: createDashboardSessionToken(userId, dashboardSecret), expires_in: 900 });
+  });
+
   // The dashboard deliberately uses the exact same identity resolver as the
   // MCP endpoint. On MCPize, the authenticated browser/proxy supplies
   // x-mcpize-user-id; without it we return no finance data at all.
