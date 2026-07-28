@@ -75,23 +75,17 @@ And a desktop dashboard view:
 | `delete_budget` | Remove a budget (per-category or overall) |
 | `get_budget_status` | Spend vs. budget for a month, with over-budget flags |
 | `list_categories` | Categories used, with counts and totals |
-| `export_expenses` | Export as CSV or JSON |
-| `add_income` | Record an income entry (`amount`, `source`, `description?`, `date?`, `currency?`) |
-| `list_income` | List income entries, newest first, with date-range / free-text filters |
-| `get_income` | Fetch one income entry by id |
-| `update_income` | Update fields of an existing income entry |
-| `delete_income` | Delete an income entry by id |
-| `get_cash_flow` | Income vs. expenses over a range (defaults to the current month), with the net |
-| `add_recurring_expense` | Schedule an expense that repeats (`daily`/`weekly`/`monthly`/`yearly`) — e.g. rent, subscriptions |
-| `list_recurring_expenses` | List recurring expenses (active and paused) with their next occurrence |
-| `update_recurring_expense` | Update a recurring expense's amount/category/schedule, or pause/resume it |
-| `delete_recurring_expense` | Remove a recurring expense (already-logged occurrences are unaffected) |
-| `process_recurring_expenses` | Immediately log any due recurring occurrences instead of waiting for the next automatic check |
-| `get_spending_trends` | This month vs. trailing average, overall and by category, with spike flags |
-
-Due recurring expenses are also caught up automatically whenever `list_expenses`
-or `get_budget_status` runs — there's no background cron in this stateless
-deployment, so materialization happens lazily on the next relevant request.
+| `full_budget_report` | Complete monthly expense/budget report with category pie and budget bar-chart images |
+| `add_income` / `get_cash_flow_report` | Track income, net cash flow, and savings rate |
+| `set_recurring_expense` | Manage recurring rent, subscriptions, utilities, and loan payments |
+| `split_expense` / `import_expenses` | Split a purchase across categories or bulk-import CSV expenses |
+| `get_spending_forecast` / `compare_months` | Forecast month-end spending and compare multi-month trends |
+| `get_budget_alerts` / `set_alert_thresholds` | Configure 50/80/100-style budget alerts |
+| `set_budget_email_alert` | Opt into an email when a monthly budget is crossed |
+| `get_dashboard_link` | Create a 15-minute private link to the authenticated user's `/dashboard` page |
+| `manage_categories` / `manage_budget_templates` | Set category limits and reusable budget templates |
+| `find_duplicate_expenses` | Identify likely duplicate transactions |
+| `export_expenses` | Export as CSV, JSON, or a portable PDF payload |
 
 **Resources:** `expense://recent` (last 20), `expense://summary/current-month`
 **Prompts:** `monthly_report`, `budget_review`
@@ -127,6 +121,17 @@ npm run start:http
 ```
 
 Point an MCP client at `http://localhost:8080/mcp`.
+
+### Private dashboard
+
+`GET /dashboard` renders the authenticated user's own budgets, monthly spend,
+income, categories, and recent expenses. It uses the same `x-mcpize-user-id`
+identity as the MCP endpoint and never returns data without an identity.
+
+For a browser opened outside MCPize's authenticated proxy, call
+`get_dashboard_link`. Configure `PUBLIC_BASE_URL` and a strong
+`DASHBOARD_SESSION_SECRET` (the same secret must be configured in the MCPize
+deployment) to receive a signed link that expires after 15 minutes.
 
 ### Tests
 

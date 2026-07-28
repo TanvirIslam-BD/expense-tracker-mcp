@@ -15,6 +15,7 @@ import {
   view,
 } from "../src/util.js";
 import type { Expense } from "../src/store/types.js";
+import { createDashboardSessionToken, verifyDashboardSessionToken } from "../src/dashboard-auth.js";
 
 /** Minimal Express-Request stand-in exposing case-insensitive header lookup. */
 function fakeReq(headers: Record<string, string>): Request {
@@ -113,6 +114,16 @@ describe("resolveUserId", () => {
     expect(resolveUserId(fakeReq({}))).toBe("solo");
     if (saved === undefined) delete process.env.DEFAULT_USER_ID;
     else process.env.DEFAULT_USER_ID = saved;
+  });
+});
+
+describe("dashboard session links", () => {
+  it("accepts a current signed token and rejects tampered or expired tokens", () => {
+    const token = createDashboardSessionToken("subscriber-1", "test-dashboard-secret");
+    expect(verifyDashboardSessionToken(token, "test-dashboard-secret")).toBe("subscriber-1");
+    expect(verifyDashboardSessionToken(`${token}x`, "test-dashboard-secret")).toBeNull();
+    const expired = createDashboardSessionToken("subscriber-1", "test-dashboard-secret", -1);
+    expect(verifyDashboardSessionToken(expired, "test-dashboard-secret")).toBeNull();
   });
 });
 

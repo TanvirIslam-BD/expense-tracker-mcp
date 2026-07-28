@@ -1,5 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
-import { newId, nextOccurrence } from "../util.js";
+import { newId } from "../util.js";
+import { EMPTY_FINANCE_STATE } from "./types.js";
 import type {
   AggregateGroup,
   AggregateOptions,
@@ -8,20 +9,10 @@ import type {
   ExpenseFilter,
   ExpensePatch,
   ExpenseStore,
-  Income,
-  IncomeFilter,
-  IncomePatch,
+  FinanceState,
   NewBudget,
   NewExpense,
-  NewIncome,
-  NewRecurringExpense,
-  RecurringExpense,
-  RecurringExpensePatch,
-  RecurringFrequency,
 } from "./types.js";
-
-/** Cap how many missed occurrences one recurring item backfills in a single pass. */
-const MAX_RECURRING_CATCHUP = 36;
 
 /**
  * SQLite/libSQL-backed store. Works identically against:
@@ -69,30 +60,15 @@ export class TursoStore implements ExpenseStore {
           created_at TEXT NOT NULL,
           UNIQUE (user_id, category)
         )`,
-        `CREATE TABLE IF NOT EXISTS income (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          amount_minor INTEGER NOT NULL,
-          currency TEXT NOT NULL,
-          source TEXT NOT NULL,
-          description TEXT NOT NULL,
-          date TEXT NOT NULL,
-          created_at TEXT NOT NULL
+        // SQLite treats NULL values as distinct in a normal UNIQUE constraint.
+        // This expression index makes the overall (NULL-category) scope unique
+        // too, so concurrent upserts cannot create duplicate overall budgets.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_user_scope ON budgets (user_id, IFNULL(category, ''))",
+        `CREATE TABLE IF NOT EXISTS finance_state (
+          user_id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          updated_at TEXT NOT NULL
         )`,
-        "CREATE INDEX IF NOT EXISTS idx_income_user ON income (user_id, date)",
-        `CREATE TABLE IF NOT EXISTS recurring_expenses (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          amount_minor INTEGER NOT NULL,
-          currency TEXT NOT NULL,
-          category TEXT NOT NULL,
-          description TEXT NOT NULL,
-          frequency TEXT NOT NULL,
-          next_date TEXT NOT NULL,
-          active INTEGER NOT NULL,
-          created_at TEXT NOT NULL
-        )`,
-        "CREATE INDEX IF NOT EXISTS idx_recurring_user ON recurring_expenses (user_id, next_date)",
       ],
       "write",
     );
@@ -129,34 +105,6 @@ export class TursoStore implements ExpenseStore {
       amountMinor: Number(row.amount_minor),
       currency: row.currency as string,
       period: row.period as "monthly",
-      createdAt: row.created_at as string,
-    };
-  }
-
-  private rowToIncome(row: Record<string, unknown>): Income {
-    return {
-      id: row.id as string,
-      userId: row.user_id as string,
-      amountMinor: Number(row.amount_minor),
-      currency: row.currency as string,
-      source: row.source as string,
-      description: row.description as string,
-      date: row.date as string,
-      createdAt: row.created_at as string,
-    };
-  }
-
-  private rowToRecurring(row: Record<string, unknown>): RecurringExpense {
-    return {
-      id: row.id as string,
-      userId: row.user_id as string,
-      amountMinor: Number(row.amount_minor),
-      currency: row.currency as string,
-      category: row.category as string,
-      description: row.description as string,
-      frequency: row.frequency as RecurringFrequency,
-      nextDate: row.next_date as string,
-      active: Number(row.active) === 1,
       createdAt: row.created_at as string,
     };
   }
@@ -254,6 +202,10 @@ export class TursoStore implements ExpenseStore {
     if (filter.limit != null) {
       sql += " LIMIT ?";
       args.push(filter.limit);
+      if (filter.offset != null) {
+        sql += " OFFSET ?";
+        args.push(filter.offset);
+      }
     }
 
     const r = await this.client.execute({ sql, args });
@@ -338,22 +290,6 @@ export class TursoStore implements ExpenseStore {
   }
 
   async setBudget(input: NewBudget): Promise<Budget> {
-    const existing = await this.client.execute({
-      sql: input.category === null
-        ? "SELECT * FROM budgets WHERE user_id = ? AND category IS NULL"
-        : "SELECT * FROM budgets WHERE user_id = ? AND category = ?",
-      args: input.category === null ? [input.userId] : [input.userId, input.category],
-    });
-
-    if (existing.rows.length) {
-      const row = existing.rows[0] as unknown as Record<string, unknown>;
-      await this.client.execute({
-        sql: "UPDATE budgets SET amount_minor = ?, currency = ? WHERE id = ?",
-        args: [input.amountMinor, input.currency, row.id as string],
-      });
-      return { ...this.rowToBudget(row), amountMinor: input.amountMinor, currency: input.currency };
-    }
-
     const budget: Budget = {
       id: newId(),
       userId: input.userId,
@@ -363,9 +299,14 @@ export class TursoStore implements ExpenseStore {
       period: "monthly",
       createdAt: new Date().toISOString(),
     };
-    await this.client.execute({
+    // One atomic UPSERT protects both category and overall (NULL-category)
+    // budgets across concurrent Cloud Run instances.
+    const result = await this.client.execute({
       sql: `INSERT INTO budgets (id, user_id, category, amount_minor, currency, period, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO UPDATE SET amount_minor = excluded.amount_minor,
+                                      currency = excluded.currency
+            RETURNING *`,
       args: [
         budget.id,
         budget.userId,
@@ -376,7 +317,7 @@ export class TursoStore implements ExpenseStore {
         budget.createdAt,
       ],
     });
-    return budget;
+    return this.rowToBudget(result.rows[0] as unknown as Record<string, unknown>);
   }
 
   async listBudgets(userId: string): Promise<Budget[]> {
@@ -395,235 +336,25 @@ export class TursoStore implements ExpenseStore {
     return r.rowsAffected > 0;
   }
 
-  async addIncome(input: NewIncome): Promise<Income> {
-    const income: Income = {
-      ...input,
-      id: newId(),
-      createdAt: new Date().toISOString(),
-    };
-    await this.client.execute({
-      sql: `INSERT INTO income
-              (id, user_id, amount_minor, currency, source, description, date, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        income.id,
-        income.userId,
-        income.amountMinor,
-        income.currency,
-        income.source,
-        income.description,
-        income.date,
-        income.createdAt,
-      ],
-    });
-    return income;
-  }
-
-  async getIncome(userId: string, id: string): Promise<Income | null> {
-    const r = await this.client.execute({
-      sql: "SELECT * FROM income WHERE user_id = ? AND id = ?",
-      args: [userId, id],
-    });
-    return r.rows.length ? this.rowToIncome(r.rows[0] as unknown as Record<string, unknown>) : null;
-  }
-
-  async listIncome(userId: string, filter: IncomeFilter = {}): Promise<Income[]> {
-    const clauses = ["user_id = ?"];
-    const args: (string | number)[] = [userId];
-
-    if (filter.from) {
-      clauses.push("date >= ?");
-      args.push(filter.from);
-    }
-    if (filter.to) {
-      clauses.push("date <= ?");
-      args.push(filter.to);
-    }
-    if (filter.search) {
-      clauses.push("(lower(description) LIKE ? OR lower(source) LIKE ?)");
-      const like = `%${filter.search.trim().toLowerCase()}%`;
-      args.push(like, like);
-    }
-
-    let sql = `SELECT * FROM income WHERE ${clauses.join(" AND ")}
-               ORDER BY date DESC, created_at DESC, rowid DESC`;
-    if (filter.limit != null) {
-      sql += " LIMIT ?";
-      args.push(filter.limit);
-    }
-
-    const r = await this.client.execute({ sql, args });
-    return r.rows.map((row) => this.rowToIncome(row as unknown as Record<string, unknown>));
-  }
-
-  async updateIncome(
-    userId: string,
-    id: string,
-    patch: IncomePatch,
-  ): Promise<Income | null> {
-    const r = await this.client.execute({
-      sql: `UPDATE income SET
-              amount_minor = COALESCE(?, amount_minor),
-              currency     = COALESCE(?, currency),
-              source       = COALESCE(?, source),
-              description  = COALESCE(?, description),
-              date         = COALESCE(?, date)
-            WHERE user_id = ? AND id = ?
-            RETURNING *`,
-      args: [
-        patch.amountMinor ?? null,
-        patch.currency ?? null,
-        patch.source ?? null,
-        patch.description ?? null,
-        patch.date ?? null,
-        userId,
-        id,
-      ],
-    });
-    return r.rows.length
-      ? this.rowToIncome(r.rows[0] as unknown as Record<string, unknown>)
-      : null;
-  }
-
-  async deleteIncome(userId: string, id: string): Promise<boolean> {
-    const r = await this.client.execute({
-      sql: "DELETE FROM income WHERE user_id = ? AND id = ?",
-      args: [userId, id],
-    });
-    return r.rowsAffected > 0;
-  }
-
-  async addRecurringExpense(input: NewRecurringExpense): Promise<RecurringExpense> {
-    const recurring: RecurringExpense = {
-      ...input,
-      active: input.active ?? true,
-      id: newId(),
-      createdAt: new Date().toISOString(),
-    };
-    await this.client.execute({
-      sql: `INSERT INTO recurring_expenses
-              (id, user_id, amount_minor, currency, category, description, frequency, next_date, active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        recurring.id,
-        recurring.userId,
-        recurring.amountMinor,
-        recurring.currency,
-        recurring.category,
-        recurring.description,
-        recurring.frequency,
-        recurring.nextDate,
-        recurring.active ? 1 : 0,
-        recurring.createdAt,
-      ],
-    });
-    return recurring;
-  }
-
-  async listRecurringExpenses(userId: string): Promise<RecurringExpense[]> {
-    const r = await this.client.execute({
-      sql: "SELECT * FROM recurring_expenses WHERE user_id = ?",
+  async getFinanceState(userId: string): Promise<FinanceState> {
+    const result = await this.client.execute({
+      sql: "SELECT data FROM finance_state WHERE user_id = ?",
       args: [userId],
     });
-    return r.rows.map((row) => this.rowToRecurring(row as unknown as Record<string, unknown>));
-  }
-
-  async updateRecurringExpense(
-    userId: string,
-    id: string,
-    patch: RecurringExpensePatch,
-  ): Promise<RecurringExpense | null> {
-    const r = await this.client.execute({
-      sql: `UPDATE recurring_expenses SET
-              amount_minor = COALESCE(?, amount_minor),
-              currency     = COALESCE(?, currency),
-              category     = COALESCE(?, category),
-              description  = COALESCE(?, description),
-              frequency    = COALESCE(?, frequency),
-              next_date    = COALESCE(?, next_date),
-              active       = COALESCE(?, active)
-            WHERE user_id = ? AND id = ?
-            RETURNING *`,
-      args: [
-        patch.amountMinor ?? null,
-        patch.currency ?? null,
-        patch.category ?? null,
-        patch.description ?? null,
-        patch.frequency ?? null,
-        patch.nextDate ?? null,
-        patch.active === undefined ? null : patch.active ? 1 : 0,
-        userId,
-        id,
-      ],
-    });
-    return r.rows.length
-      ? this.rowToRecurring(r.rows[0] as unknown as Record<string, unknown>)
-      : null;
-  }
-
-  async deleteRecurringExpense(userId: string, id: string): Promise<boolean> {
-    const r = await this.client.execute({
-      sql: "DELETE FROM recurring_expenses WHERE user_id = ? AND id = ?",
-      args: [userId, id],
-    });
-    return r.rowsAffected > 0;
-  }
-
-  async processDueRecurring(userId: string, today: string): Promise<Expense[]> {
-    const due = await this.client.execute({
-      sql: "SELECT * FROM recurring_expenses WHERE user_id = ? AND active = 1 AND next_date <= ?",
-      args: [userId, today],
-    });
-    if (due.rows.length === 0) return [];
-
-    const created: Expense[] = [];
-    const statements: { sql: string; args: (string | number)[] }[] = [];
-    const now = new Date().toISOString();
-
-    for (const row of due.rows as unknown as Record<string, unknown>[]) {
-      const r = this.rowToRecurring(row);
-      let next = r.nextDate;
-      let guard = 0;
-      while (next <= today && guard < MAX_RECURRING_CATCHUP) {
-        const expense: Expense = {
-          id: newId(),
-          userId,
-          amountMinor: r.amountMinor,
-          currency: r.currency,
-          category: r.category,
-          description: r.description,
-          date: next,
-          createdAt: now,
-        };
-        created.push(expense);
-        statements.push({
-          sql: `INSERT INTO expenses
-                  (id, user_id, amount_minor, currency, category, description, date, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          args: [
-            expense.id,
-            expense.userId,
-            expense.amountMinor,
-            expense.currency,
-            expense.category,
-            expense.description,
-            expense.date,
-            expense.createdAt,
-          ],
-        });
-        next = nextOccurrence(next, r.frequency);
-        guard++;
-      }
-      if (next !== r.nextDate) {
-        statements.push({
-          sql: "UPDATE recurring_expenses SET next_date = ? WHERE id = ?",
-          args: [next, r.id],
-        });
-      }
+    if (!result.rows.length) return structuredClone(EMPTY_FINANCE_STATE);
+    try {
+      return { ...structuredClone(EMPTY_FINANCE_STATE), ...JSON.parse(String(result.rows[0].data)) } as FinanceState;
+    } catch {
+      return structuredClone(EMPTY_FINANCE_STATE);
     }
+  }
 
-    if (statements.length > 0) await this.client.batch(statements, "write");
-    return created;
+  async setFinanceState(userId: string, state: FinanceState): Promise<void> {
+    await this.client.execute({
+      sql: `INSERT INTO finance_state (user_id, data, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+      args: [userId, JSON.stringify(state), new Date().toISOString()],
+    });
   }
 
   /** Releases the underlying connection/file handle. Mainly useful for tests. */

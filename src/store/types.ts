@@ -49,6 +49,7 @@ export interface ExpenseFilter {
   /** Case-insensitive substring matched against description and category. */
   search?: string;
   limit?: number;
+  offset?: number;
 }
 
 export interface NewBudget {
@@ -57,6 +58,83 @@ export interface NewBudget {
   amountMinor: number;
   currency: string;
 }
+
+/** Extended finance entities are stored as one durable, per-user document.
+ * Keeping them together lets the MCP layer evolve without breaking the small,
+ * highly-optimised expense and budget tables used by existing installations. */
+export interface IncomeRecord {
+  id: string;
+  amountMinor: number;
+  currency: string;
+  source: string;
+  date: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface RecurringTransaction {
+  id: string;
+  kind: "expense" | "income";
+  amountMinor: number;
+  currency: string;
+  category: string;
+  description: string;
+  merchant: string;
+  frequency: "weekly" | "monthly" | "yearly";
+  nextDate: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface BudgetRule {
+  id: string;
+  category: string | null;
+  amountMinor: number;
+  currency: string;
+  period: "weekly" | "monthly" | "yearly" | "custom";
+  startDate?: string;
+  endDate?: string;
+  rollover: "reset" | "carry";
+  createdAt: string;
+}
+
+export interface CategorySettings {
+  category: string;
+  limitMinor?: number;
+  currency?: string;
+  color?: string;
+}
+
+export interface BudgetTemplate {
+  name: string;
+  rules: Omit<BudgetRule, "id" | "createdAt">[];
+}
+
+export interface FinanceState {
+  incomes: IncomeRecord[];
+  recurring: RecurringTransaction[];
+  budgetRules: BudgetRule[];
+  categories: CategorySettings[];
+  templates: BudgetTemplate[];
+  alertThresholds: number[];
+  expenseMetadata?: Record<string, { merchant?: string; paymentMethod?: string; tags?: string[] }>;
+  notificationEmail?: string;
+  emailAlertsEnabled?: boolean;
+  /** Alert deduplication keys, e.g. 2026-07:overall:USD:100. */
+  sentAlertKeys?: string[];
+}
+
+export const EMPTY_FINANCE_STATE: FinanceState = {
+  incomes: [],
+  recurring: [],
+  budgetRules: [],
+  categories: [],
+  templates: [],
+  alertThresholds: [50, 80, 100],
+  expenseMetadata: {},
+  emailAlertsEnabled: false,
+  sentAlertKeys: [],
+};
 
 /** One aggregation bucket: a group key with its count and per-currency totals. */
 export interface AggregateGroup {
@@ -73,84 +151,6 @@ export interface AggregateOptions {
   from?: string;
   /** Inclusive end date, YYYY-MM-DD. */
   to?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Income
-// ---------------------------------------------------------------------------
-
-export interface Income {
-  id: string;
-  userId: string;
-  /** Amount in integer minor units (e.g. cents). */
-  amountMinor: number;
-  /** ISO-4217 currency code, uppercased. */
-  currency: string;
-  /** Where the income came from, normalised to lowercase (e.g. salary, freelance). */
-  source: string;
-  description: string;
-  /** Calendar date, YYYY-MM-DD. */
-  date: string;
-  createdAt: string;
-}
-
-export type NewIncome = Omit<Income, "id" | "createdAt">;
-
-export interface IncomePatch {
-  amountMinor?: number;
-  currency?: string;
-  source?: string;
-  description?: string;
-  date?: string;
-}
-
-export interface IncomeFilter {
-  /** Inclusive start date, YYYY-MM-DD. */
-  from?: string;
-  /** Inclusive end date, YYYY-MM-DD. */
-  to?: string;
-  /** Case-insensitive substring matched against description and source. */
-  search?: string;
-  limit?: number;
-}
-
-// ---------------------------------------------------------------------------
-// Recurring expenses — a schedule that materializes into real Expense rows
-// when due. There's no background cron in this stateless deployment, so
-// materialization happens lazily: whenever a request touches a user's
-// expenses (see ExpenseStore.processDueRecurring), any occurrences due as of
-// that moment get logged and the schedule advances.
-// ---------------------------------------------------------------------------
-
-export type RecurringFrequency = "daily" | "weekly" | "monthly" | "yearly";
-
-export interface RecurringExpense {
-  id: string;
-  userId: string;
-  amountMinor: number;
-  currency: string;
-  category: string;
-  description: string;
-  frequency: RecurringFrequency;
-  /** Calendar date, YYYY-MM-DD, of the next occurrence still to be logged. */
-  nextDate: string;
-  active: boolean;
-  createdAt: string;
-}
-
-export type NewRecurringExpense = Omit<
-  RecurringExpense,
-  "id" | "createdAt" | "active"
-> & { active?: boolean };
-
-export interface RecurringExpensePatch {
-  amountMinor?: number;
-  currency?: string;
-  category?: string;
-  description?: string;
-  frequency?: RecurringFrequency;
-  nextDate?: string;
-  active?: boolean;
 }
 
 export interface ExpenseStore {
@@ -176,24 +176,6 @@ export interface ExpenseStore {
   listBudgets(userId: string): Promise<Budget[]>;
   deleteBudget(userId: string, id: string): Promise<boolean>;
 
-  addIncome(income: NewIncome): Promise<Income>;
-  getIncome(userId: string, id: string): Promise<Income | null>;
-  listIncome(userId: string, filter?: IncomeFilter): Promise<Income[]>;
-  updateIncome(userId: string, id: string, patch: IncomePatch): Promise<Income | null>;
-  deleteIncome(userId: string, id: string): Promise<boolean>;
-
-  addRecurringExpense(input: NewRecurringExpense): Promise<RecurringExpense>;
-  listRecurringExpenses(userId: string): Promise<RecurringExpense[]>;
-  updateRecurringExpense(
-    userId: string,
-    id: string,
-    patch: RecurringExpensePatch,
-  ): Promise<RecurringExpense | null>;
-  deleteRecurringExpense(userId: string, id: string): Promise<boolean>;
-  /**
-   * Materialize any occurrences due on or before `today` into real Expense
-   * rows, advancing each schedule's nextDate past `today`. Returns the newly
-   * created expenses.
-   */
-  processDueRecurring(userId: string, today: string): Promise<Expense[]>;
+  getFinanceState(userId: string): Promise<FinanceState>;
+  setFinanceState(userId: string, state: FinanceState): Promise<void>;
 }
