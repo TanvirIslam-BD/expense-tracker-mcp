@@ -2,7 +2,7 @@ import express, { type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { buildServer } from "./server.js";
-import { verifyDashboardSessionToken } from "./dashboard-auth.js";
+import { createDashboardSessionToken, verifyDashboardSessionToken } from "./dashboard-auth.js";
 import { MemoryStore } from "./store/memory.js";
 import { TursoStore } from "./store/turso.js";
 import type { ExpenseStore } from "./store/types.js";
@@ -42,6 +42,73 @@ function createStore(): ExpenseStore {
       "instance. Set TURSO_DATABASE_URL for durable storage in production.",
   );
   return new MemoryStore(process.env.DATA_DIR);
+}
+
+const MCPIZE_AUTH_URL = process.env.MCPIZE_AUTH_URL || "https://mcpize.com/auth";
+
+/**
+ * The Vercel dashboard cannot inspect MCPize's browser cookies.  This server
+ * is therefore the trusted hand-off point: MCPize supplies the user identity
+ * here, and we issue the short-lived, signed dashboard token only after that
+ * identity has been resolved.
+ */
+function configuredDashboardUrl(): URL | null {
+  const value = (process.env.DASHBOARD_WEB_URL || process.env.EXPENSE_TRACKER_WEB_URL || "").replace(/\/$/, "");
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function dashboardMonth(req: Request): string {
+  return typeof req.query.month === "string" && isValidMonth(req.query.month) ? req.query.month : currentMonth();
+}
+
+function mcpDashboardUrl(req: Request): URL {
+  const forwardedProtocol = req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProtocol === "https" ? "https" : req.protocol;
+  const host = req.get("host") || "expense-tracker-mcp.mcpize.run";
+  const url = new URL("/dashboard", `${protocol}://${host}`);
+  url.searchParams.set("month", dashboardMonth(req));
+  const requestedReturn = typeof req.query.return_to === "string" ? req.query.return_to : "";
+  const destination = configuredDashboardUrl();
+  if (requestedReturn && destination) {
+    try {
+      const candidate = new URL(requestedReturn);
+      // Never turn the dashboard into an open redirect.  Only its configured
+      // public origin and the /dashboard path are permitted.
+      if (candidate.origin === destination.origin && candidate.pathname === "/dashboard") {
+        url.searchParams.set("return_to", candidate.toString());
+      }
+    } catch {
+      // An invalid return URL is ignored and cannot affect authentication.
+    }
+  }
+  return url;
+}
+
+function mcpizeLoginUrl(req: Request): string {
+  const login = new URL(MCPIZE_AUTH_URL);
+  login.searchParams.set("return_to", mcpDashboardUrl(req).toString());
+  return login.toString();
+}
+
+function signedWebDashboardUrl(userId: string, req: Request, secret: string): string | null {
+  const configured = configuredDashboardUrl();
+  const requestedReturn = typeof req.query.return_to === "string" ? req.query.return_to : "";
+  if (!configured || !requestedReturn) return null;
+  try {
+    const destination = new URL(requestedReturn);
+    if (destination.origin !== configured.origin || destination.pathname !== "/dashboard") return null;
+    destination.searchParams.set("month", dashboardMonth(req));
+    destination.searchParams.set("dashboard_token", createDashboardSessionToken(userId, secret));
+    return destination.toString();
+  } catch {
+    return null;
+  }
 }
 
 const store = createStore();
@@ -225,10 +292,18 @@ async function startHttp(): Promise<void> {
     const cookieToken = req.header("cookie")?.match(/(?:^|;\s*)expense_tracker_dashboard=([^;]+)/)?.[1];
     const userId = resolveUserId(req) || verifyDashboardSessionToken(cookieToken, dashboardSecret);
     if (!userId) {
-      // MCPize owns the OAuth client/state/PKCE parameters. Redirect to its
-      // auth entry point instead of attempting to construct an OAuth URL here.
-      res.redirect(302, "https://mcpize.com/auth");
+      // The return URL is this MCP dashboard bridge, not the Vercel dashboard.
+      // After MCPize authenticates the browser, it can supply the stable
+      // x-mcpize-user-id here; only then do we create a signed web session.
+      res.redirect(302, mcpizeLoginUrl(req));
       return;
+    }
+    if (dashboardSecret) {
+      const webDashboard = signedWebDashboardUrl(userId, req, dashboardSecret);
+      if (webDashboard) {
+        res.redirect(302, webDashboard);
+        return;
+      }
     }
     try {
       const requestedMonth = typeof req.query.month === "string" ? req.query.month : currentMonth();
