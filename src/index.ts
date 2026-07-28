@@ -225,7 +225,9 @@ async function startHttp(): Promise<void> {
     const cookieToken = req.header("cookie")?.match(/(?:^|;\s*)expense_tracker_dashboard=([^;]+)/)?.[1];
     const userId = resolveUserId(req) || verifyDashboardSessionToken(cookieToken, dashboardSecret);
     if (!userId) {
-      res.status(401).type("html").send("<h1>Sign-in required</h1><p>Open this dashboard through your authenticated MCPize connection.</p>");
+      // MCPize owns the OAuth client/state/PKCE parameters. Redirect to its
+      // auth entry point instead of attempting to construct an OAuth URL here.
+      res.redirect(302, "https://mcpize.com/auth");
       return;
     }
     try {
