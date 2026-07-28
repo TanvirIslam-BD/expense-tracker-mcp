@@ -1472,9 +1472,9 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     description: "Create a short-lived link to the authenticated user's private /dashboard page.",
     inputSchema: z.object({}),
   }, async () => {
-    const baseUrl = process.env.PUBLIC_BASE_URL?.replace(/\/$/, "");
+    const baseUrl = (process.env.DASHBOARD_WEB_URL || process.env.EXPENSE_TRACKER_WEB_URL || process.env.PUBLIC_BASE_URL)?.replace(/\/$/, "");
     const secret = process.env.DASHBOARD_SESSION_SECRET;
-    if (!baseUrl || !secret) return fail("Dashboard links require PUBLIC_BASE_URL and DASHBOARD_SESSION_SECRET on the server.");
+    if (!baseUrl || !secret) return fail("Dashboard links require DASHBOARD_WEB_URL (or EXPENSE_TRACKER_WEB_URL) and DASHBOARD_SESSION_SECRET on the server.");
     const dashboardToken = createDashboardSessionToken(userId, secret);
     const url = `${baseUrl}/dashboard?dashboard_token=${encodeURIComponent(dashboardToken)}`;
     return text(`Open your private dashboard: ${url}\n\nThis link expires in 15 minutes.`, { url, expires_in_minutes: 15 });
