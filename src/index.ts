@@ -281,7 +281,12 @@ async function startHttp(): Promise<void> {
   // hash of the bearer token: that could point at a different data namespace.
   app.get("/dashboard/session", (req: Request, res: Response) => {
     const dashboardSecret = process.env.DASHBOARD_SESSION_SECRET;
-    const userId = (req.header("x-mcpize-user-id") || req.header("x-mcpize-user") || "").trim();
+    const userId = (
+      req.header("x-mcpize-user-id") ||
+      req.header("x-mcpize-user") ||
+      req.header("x-user-id") ||
+      ""
+    ).trim();
     if (!dashboardSecret) {
       res.status(503).json({ error: "Dashboard sessions are not configured." });
       return;
