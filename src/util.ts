@@ -65,7 +65,26 @@ export function isValidDate(s: string): boolean {
 }
 
 export function isValidMonth(s: string): boolean {
-  return MONTH_RE.test(s);
+  if (!MONTH_RE.test(s)) return false;
+  const month = Number(s.slice(5, 7));
+  return month >= 1 && month <= 12;
+}
+
+export function isValidCurrency(s: string): boolean {
+  return /^[A-Z]{3}$/.test(s);
+}
+
+/** Values are stored in SQLite INTEGER minor units; stay safely below 2^53. */
+export function isSafeMoneyAmount(amount: number): boolean {
+  return Number.isFinite(amount) && amount > 0 && Number.isSafeInteger(Math.round(amount * 100));
+}
+
+export function hasValidDateRange(from?: string, to?: string): boolean {
+  return (!from || !to || from <= to);
+}
+
+export function daysInMonth(month: string): number {
+  return new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
 }
 
 /** Shift a YYYY-MM month string by `delta` months (may be negative). */

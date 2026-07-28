@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { newId, nextOccurrence } from "../util.js";
+import { newId } from "../util.js";
+import { EMPTY_FINANCE_STATE } from "./types.js";
 import type {
   AggregateGroup,
   AggregateOptions,
@@ -9,26 +10,16 @@ import type {
   ExpenseFilter,
   ExpensePatch,
   ExpenseStore,
-  Income,
-  IncomeFilter,
-  IncomePatch,
+  FinanceState,
   NewBudget,
   NewExpense,
-  NewIncome,
-  NewRecurringExpense,
-  RecurringExpense,
-  RecurringExpensePatch,
 } from "./types.js";
 
 interface Db {
   expenses: Expense[];
   budgets: Budget[];
-  income: Income[];
-  recurring: RecurringExpense[];
+  finance?: Record<string, FinanceState>;
 }
-
-/** Cap how many missed occurrences one recurring item backfills in a single pass. */
-const MAX_RECURRING_CATCHUP = 36;
 
 /**
  * In-memory store with optional JSON-file persistence.
@@ -39,7 +30,7 @@ const MAX_RECURRING_CATCHUP = 36;
  * database (see README).
  */
 export class MemoryStore implements ExpenseStore {
-  private db: Db = { expenses: [], budgets: [], income: [], recurring: [] };
+  private db: Db = { expenses: [], budgets: [], finance: {} };
   private readonly file: string | null;
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -55,12 +46,10 @@ export class MemoryStore implements ExpenseStore {
       this.db = {
         expenses: parsed.expenses ?? [],
         budgets: parsed.budgets ?? [],
-        income: parsed.income ?? [],
-        recurring: parsed.recurring ?? [],
+        finance: parsed.finance ?? {},
       };
       console.error(
-        `[store] loaded ${this.db.expenses.length} expenses, ${this.db.budgets.length} budgets, ` +
-          `${this.db.income.length} income, ${this.db.recurring.length} recurring from ${this.file}`,
+        `[store] loaded ${this.db.expenses.length} expenses, ${this.db.budgets.length} budgets from ${this.file}`,
       );
     } catch {
       // No file yet (or unreadable) — start empty.
@@ -140,7 +129,8 @@ export class MemoryStore implements ExpenseStore {
       })
       .map((x) => x.e);
 
-    return filter.limit != null ? ordered.slice(0, filter.limit) : ordered;
+    const offset = filter.offset ?? 0;
+    return filter.limit != null ? ordered.slice(offset, offset + filter.limit) : ordered.slice(offset);
   }
 
   async updateExpense(
@@ -230,148 +220,13 @@ export class MemoryStore implements ExpenseStore {
     return removed;
   }
 
-  async addIncome(input: NewIncome): Promise<Income> {
-    const income: Income = {
-      ...input,
-      id: newId(),
-      createdAt: new Date().toISOString(),
-    };
-    this.db.income.push(income);
+  async getFinanceState(userId: string): Promise<FinanceState> {
+    return structuredClone(this.db.finance?.[userId] ?? EMPTY_FINANCE_STATE);
+  }
+
+  async setFinanceState(userId: string, state: FinanceState): Promise<void> {
+    this.db.finance ??= {};
+    this.db.finance[userId] = structuredClone(state);
     this.persist();
-    return income;
-  }
-
-  async getIncome(userId: string, id: string): Promise<Income | null> {
-    return this.db.income.find((i) => i.userId === userId && i.id === id) ?? null;
-  }
-
-  async listIncome(userId: string, filter: IncomeFilter = {}): Promise<Income[]> {
-    let items = this.db.income.filter((i) => i.userId === userId);
-
-    if (filter.from) items = items.filter((i) => i.date >= filter.from!);
-    if (filter.to) items = items.filter((i) => i.date <= filter.to!);
-    if (filter.search) {
-      const q = filter.search.trim().toLowerCase();
-      items = items.filter(
-        (i) =>
-          i.description.toLowerCase().includes(q) ||
-          i.source.toLowerCase().includes(q),
-      );
-    }
-
-    const ordered = items
-      .map((e, i) => ({ e, i }))
-      .sort((a, b) => {
-        if (a.e.date !== b.e.date) return b.e.date.localeCompare(a.e.date);
-        if (a.e.createdAt !== b.e.createdAt)
-          return b.e.createdAt.localeCompare(a.e.createdAt);
-        return b.i - a.i;
-      })
-      .map((x) => x.e);
-
-    return filter.limit != null ? ordered.slice(0, filter.limit) : ordered;
-  }
-
-  async updateIncome(
-    userId: string,
-    id: string,
-    patch: IncomePatch,
-  ): Promise<Income | null> {
-    const income = this.db.income.find((i) => i.userId === userId && i.id === id);
-    if (!income) return null;
-
-    if (patch.amountMinor != null) income.amountMinor = patch.amountMinor;
-    if (patch.currency != null) income.currency = patch.currency;
-    if (patch.source != null) income.source = patch.source;
-    if (patch.description != null) income.description = patch.description;
-    if (patch.date != null) income.date = patch.date;
-
-    this.persist();
-    return income;
-  }
-
-  async deleteIncome(userId: string, id: string): Promise<boolean> {
-    const before = this.db.income.length;
-    this.db.income = this.db.income.filter(
-      (i) => !(i.userId === userId && i.id === id),
-    );
-    const removed = this.db.income.length < before;
-    if (removed) this.persist();
-    return removed;
-  }
-
-  async addRecurringExpense(input: NewRecurringExpense): Promise<RecurringExpense> {
-    const recurring: RecurringExpense = {
-      ...input,
-      active: input.active ?? true,
-      id: newId(),
-      createdAt: new Date().toISOString(),
-    };
-    this.db.recurring.push(recurring);
-    this.persist();
-    return recurring;
-  }
-
-  async listRecurringExpenses(userId: string): Promise<RecurringExpense[]> {
-    return this.db.recurring.filter((r) => r.userId === userId);
-  }
-
-  async updateRecurringExpense(
-    userId: string,
-    id: string,
-    patch: RecurringExpensePatch,
-  ): Promise<RecurringExpense | null> {
-    const r = this.db.recurring.find((x) => x.userId === userId && x.id === id);
-    if (!r) return null;
-
-    if (patch.amountMinor != null) r.amountMinor = patch.amountMinor;
-    if (patch.currency != null) r.currency = patch.currency;
-    if (patch.category != null) r.category = patch.category;
-    if (patch.description != null) r.description = patch.description;
-    if (patch.frequency != null) r.frequency = patch.frequency;
-    if (patch.nextDate != null) r.nextDate = patch.nextDate;
-    if (patch.active != null) r.active = patch.active;
-
-    this.persist();
-    return r;
-  }
-
-  async deleteRecurringExpense(userId: string, id: string): Promise<boolean> {
-    const before = this.db.recurring.length;
-    this.db.recurring = this.db.recurring.filter(
-      (r) => !(r.userId === userId && r.id === id),
-    );
-    const removed = this.db.recurring.length < before;
-    if (removed) this.persist();
-    return removed;
-  }
-
-  async processDueRecurring(userId: string, today: string): Promise<Expense[]> {
-    const created: Expense[] = [];
-    const now = new Date().toISOString();
-
-    for (const r of this.db.recurring) {
-      if (r.userId !== userId || !r.active) continue;
-      let guard = 0;
-      while (r.nextDate <= today && guard < MAX_RECURRING_CATCHUP) {
-        const expense: Expense = {
-          id: newId(),
-          userId,
-          amountMinor: r.amountMinor,
-          currency: r.currency,
-          category: r.category,
-          description: r.description,
-          date: r.nextDate,
-          createdAt: now,
-        };
-        this.db.expenses.push(expense);
-        created.push(expense);
-        r.nextDate = nextOccurrence(r.nextDate, r.frequency);
-        guard++;
-      }
-    }
-
-    if (created.length > 0) this.persist();
-    return created;
   }
 }
