@@ -435,6 +435,18 @@ async function startHttp(): Promise<void> {
         return;
       }
 
+      if (userId && method && DATA_METHODS.has(method)) {
+        const status = await store.getUserAccessStatus(userId);
+        if (status === "suspended") {
+          res.status(200).json({
+            jsonrpc: "2.0",
+            id: body.id ?? null,
+            error: { code: -32003, message: "This account has been suspended. Contact Expense Tracker support." },
+          });
+          return;
+        }
+      }
+
       const server = buildServer(store, userId ?? "__unidentified__");
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
@@ -445,6 +457,13 @@ async function startHttp(): Promise<void> {
       });
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
+      if (userId && method && DATA_METHODS.has(method)) {
+        try {
+          await store.recordActivity(userId, "mcp", body.params?.name || method, { method });
+        } catch (activityError) {
+          console.error("[mcp] activity logging failed:", activityError);
+        }
+      }
     } catch (err) {
       console.error("[mcp] request error:", err);
       if (!res.headersSent) {

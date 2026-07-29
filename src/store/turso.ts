@@ -69,6 +69,30 @@ export class TursoStore implements ExpenseStore {
           data TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )`,
+        `CREATE TABLE IF NOT EXISTS app_users (
+          user_id TEXT PRIMARY KEY,
+          display_name TEXT NOT NULL DEFAULT '',
+          profile_photo_url TEXT NOT NULL DEFAULT '',
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL
+        )`,
+        `CREATE TABLE IF NOT EXISTS owner_user_controls (
+          user_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'active',
+          reason TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL,
+          updated_by TEXT NOT NULL
+        )`,
+        `CREATE TABLE IF NOT EXISTS app_activity (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        )`,
+        "CREATE INDEX IF NOT EXISTS idx_app_activity_created ON app_activity (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_app_activity_user ON app_activity (user_id, created_at DESC)",
       ],
       "write",
     );
@@ -82,6 +106,31 @@ export class TursoStore implements ExpenseStore {
     } catch {
       // A failed warm-up is non-fatal — the real query will surface any error.
     }
+  }
+
+  async getUserAccessStatus(userId: string): Promise<"active" | "suspended"> {
+    const result = await this.client.execute({
+      sql: "SELECT status FROM owner_user_controls WHERE user_id = ?",
+      args: [userId],
+    });
+    return String(result.rows[0]?.status || "active") === "suspended" ? "suspended" : "active";
+  }
+
+  async recordActivity(userId: string, source: string, eventType: string, detail: Record<string, unknown> = {}): Promise<void> {
+    const now = new Date().toISOString();
+    let encoded = "{}";
+    try { encoded = JSON.stringify(detail).slice(0, 2000); } catch { encoded = "{}"; }
+    await this.client.batch([
+      {
+        sql: `INSERT INTO app_users (user_id,display_name,profile_photo_url,first_seen_at,last_seen_at)
+              VALUES (?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET last_seen_at=excluded.last_seen_at`,
+        args: [userId, "", "", now, now],
+      },
+      {
+        sql: "INSERT INTO app_activity (id,user_id,source,event_type,detail,created_at) VALUES (?,?,?,?,?,?)",
+        args: [newId(), userId, source.slice(0, 40), eventType.slice(0, 80), encoded, now],
+      },
+    ], "write");
   }
 
   private rowToExpense(row: Record<string, unknown>): Expense {

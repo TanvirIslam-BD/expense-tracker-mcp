@@ -156,6 +156,9 @@ export interface AggregateOptions {
 export interface ExpenseStore {
   init(): Promise<void>;
 
+  getUserAccessStatus(userId: string): Promise<"active" | "suspended">;
+  recordActivity(userId: string, source: string, eventType: string, detail?: Record<string, unknown>): Promise<void>;
+
   addExpense(expense: NewExpense): Promise<Expense>;
   /** Insert several expenses at once (one round trip where the backend supports it). */
   addExpenses(expenses: NewExpense[]): Promise<Expense[]>;

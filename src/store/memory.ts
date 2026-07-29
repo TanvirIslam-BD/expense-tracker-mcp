@@ -56,6 +56,12 @@ export class MemoryStore implements ExpenseStore {
     }
   }
 
+  async getUserAccessStatus(_userId: string): Promise<"active" | "suspended"> {
+    return "active";
+  }
+
+  async recordActivity(_userId: string, _source: string, _eventType: string, _detail: Record<string, unknown> = {}): Promise<void> {}
+
   /** Serialise writes so concurrent mutations can't corrupt the JSON file. */
   private persist(): void {
     if (!this.file) return;
