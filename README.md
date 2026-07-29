@@ -117,7 +117,7 @@ npm run inspect
 
 ```bash
 npm run start:http
-# -> POST http://localhost:8080/mcp   (GET /health for a health check)
+# -> POST http://localhost:8080/mcp   (GET /health or /ping for a health check)
 ```
 
 Point an MCP client at `http://localhost:8080/mcp`.

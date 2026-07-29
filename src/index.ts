@@ -253,10 +253,13 @@ async function startHttp(): Promise<void> {
     next();
   });
 
-  // Health check for MCPize / Cloud Run uptime monitoring.
-  app.get("/health", (_req: Request, res: Response) => {
+  // Public, dependency-free health checks for MCPize / Cloud Run monitors.
+  const sendHealthStatus = (_req: Request, res: Response) => {
+    res.set("Cache-Control", "no-store");
     res.json({ status: "ok", server: "expense-tracker", version: "1.0.0" });
-  });
+  };
+  app.get("/health", sendHealthStatus);
+  app.get("/ping", sendHealthStatus);
 
   // Domain-ownership check for the OpenAI Apps/MCP directory submission flow.
   // Serves the verification token OpenAI issues at the well-known path it
