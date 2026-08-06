@@ -1,12 +1,30 @@
 import express, { type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import os from "node:os";
+import path from "node:path";
 import { buildServer } from "./server.js";
 import { createDashboardSessionToken, verifyDashboardSessionToken } from "./dashboard-auth.js";
 import { MemoryStore } from "./store/memory.js";
 import { TursoStore } from "./store/turso.js";
 import type { ExpenseStore } from "./store/types.js";
+import { getOidcProvider, OIDC_MOUNT_PATH, resolveOAuthUserId } from "./auth/oidc-provider.js";
+import { mountOidcInteractions } from "./auth/oidc-routes.js";
+import { mcpizeAuthorizationServerIssuers } from "./auth/mcpize-oauth.js";
 import { currentMonth, formatMoney, isValidMonth, resolveUserId } from "./util.js";
+
+/**
+ * Transport selection, computed up front so `createStore()` can pick a sane
+ * default for stdio (local/plugin) use before the rest of the module runs.
+ *  --http / MCP_TRANSPORT=http   -> HTTP
+ *  --stdio / MCP_TRANSPORT=stdio -> stdio
+ *  otherwise: HTTP if PORT is set (MCPize / Cloud Run), else stdio.
+ */
+function useHttp(): boolean {
+  if (process.argv.includes("--http") || process.env.MCP_TRANSPORT === "http") return true;
+  if (process.argv.includes("--stdio") || process.env.MCP_TRANSPORT === "stdio") return false;
+  return Boolean(process.env.PORT);
+}
 
 /**
  * TURSO_DATABASE_URL may embed its auth token as a query param
@@ -31,17 +49,33 @@ function resolveTursoConfig(): { url: string; authToken?: string } | null {
   return { url: raw, authToken: process.env.TURSO_AUTH_TOKEN };
 }
 
+/**
+ * Local/stdio use (plugin installs, MCP Inspector, self-hosting) has no
+ * platform-injected DATA_DIR and no Turso secret, so without a default here
+ * every expense would vanish the moment the session ends. Hosted HTTP mode
+ * keeps the original memory-with-a-warning behavior — a container's local
+ * disk doesn't survive a redeploy either, so the real fix there is Turso.
+ */
+function defaultStdioDataDir(): string {
+  return path.join(os.homedir(), ".expense-tracker-mcp");
+}
+
 function createStore(): ExpenseStore {
   const turso = resolveTursoConfig();
   if (turso) {
     console.error(`[store] using TursoStore (${turso.url.replace(/\?.*/, "")})`);
     return new TursoStore(turso.url, turso.authToken);
   }
-  console.error(
-    "[store] using MemoryStore — data will NOT survive a restart or a second " +
-      "instance. Set TURSO_DATABASE_URL for durable storage in production.",
-  );
-  return new MemoryStore(process.env.DATA_DIR);
+  const dataDir = process.env.DATA_DIR || (useHttp() ? undefined : defaultStdioDataDir());
+  if (dataDir) {
+    console.error(`[store] using MemoryStore with JSON persistence at ${dataDir}`);
+  } else {
+    console.error(
+      "[store] using MemoryStore — data will NOT survive a restart or a second " +
+        "instance. Set TURSO_DATABASE_URL for durable storage in production.",
+    );
+  }
+  return new MemoryStore(dataDir);
 }
 
 const MCPIZE_AUTH_URL = process.env.MCPIZE_AUTH_URL || "https://mcpize.com/auth";
@@ -223,15 +257,10 @@ function referenceDashboardPage(input: ReferenceDashboardInput): string {
 void dashboardPage;
 void properDashboardPage;
 
-function useHttp(): boolean {
-  if (process.argv.includes("--http") || process.env.MCP_TRANSPORT === "http") return true;
-  if (process.argv.includes("--stdio") || process.env.MCP_TRANSPORT === "stdio") return false;
-  return Boolean(process.env.PORT);
-}
-
 async function startHttp(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   // Public email artwork (for example the budget-alert hero) is served from
   // the repository assets directory. Configure PUBLIC_BASE_URL in production
   // so customer emails can reference this stable HTTPS location.
@@ -270,6 +299,42 @@ async function startHttp(): Promise<void> {
   app.get("/.well-known/openai-apps-challenge", (_req: Request, res: Response) => {
     res.type("text/plain").send(OPENAI_APPS_CHALLENGE_TOKEN);
   });
+
+  // A self-hosted fallback authorization server (see auth/oidc-provider.ts),
+  // only active when explicitly enabled. MCPize already runs its own OAuth
+  // authorization server for this MCP server (the same one third-party
+  // dashboards go through) — that's the primary path, configured via
+  // MCPIZE_OAUTH_ISSUER / MCPIZE_TOKEN_INTROSPECTION_URL below. This local
+  // provider exists for environments (local dev, self-hosting) where
+  // MCPize's isn't in the loop.
+  const localOidcEnabled = process.env.ENABLE_LOCAL_OIDC === "true";
+  if (localOidcEnabled) {
+    // Mounted at the same path segment as the provider's issuer (see
+    // oidc-provider.ts) — oidc-provider's callback() is a self-contained app
+    // that would otherwise swallow every unmatched route with its own 404.
+    const oidcProvider = getOidcProvider();
+    app.use(OIDC_MOUNT_PATH, oidcProvider.callback());
+    mountOidcInteractions(app, oidcProvider);
+  }
+
+  // OAuth 2.0 Protected Resource Metadata (RFC 9728). This is how Claude's
+  // MCP client discovers where to authenticate: it reads `authorization_servers`
+  // from this document after receiving a 401 with a matching WWW-Authenticate
+  // header from /mcp below. See the "Connectors" auth docs for the handshake.
+  app.get("/.well-known/oauth-protected-resource", (req: Request, res: Response) => {
+    const forwardedProtocol = req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+    const protocol = forwardedProtocol === "https" ? "https" : req.protocol;
+    const host = req.get("host") || "expense-tracker-mcp.mcpize.run";
+    const authorizationServers = [
+      ...mcpizeAuthorizationServerIssuers(),
+      ...(localOidcEnabled ? [getOidcProvider().issuer] : []),
+    ];
+    res.set("Cache-Control", "no-store").json({
+      resource: `${protocol}://${host}/mcp`,
+      authorization_servers: authorizationServers,
+    });
+  });
+
   app.get("/", (_req: Request, res: Response) => {
     res.json({
       name: "expense-tracker-mcp",
@@ -392,9 +457,26 @@ async function startHttp(): Promise<void> {
   // Stateless Streamable HTTP: a fresh server + transport per request, with the
   // subscriber isolated via their auth header. The store is shared, so data
   // persists across requests.
+  const protectedResourceMetadataUrl = (req: Request): string => {
+    const forwardedProtocol = req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+    const protocol = forwardedProtocol === "https" ? "https" : req.protocol;
+    const host = req.get("host") || "expense-tracker-mcp.mcpize.run";
+    return `${protocol}://${host}/.well-known/oauth-protected-resource`;
+  };
+
   app.post("/mcp", async (req: Request, res: Response) => {
     try {
-      const userId = resolveUserId(req);
+      // MCPize's gateway (in front of this app's public domain) already
+      // validates the OAuth bearer token from Claude's connector flow and
+      // injects x-mcpize-user-id before the request reaches this Express
+      // app — confirmed against the companion dashboard's own MCP client,
+      // which sends only a bearer token and no identity header (see
+      // auth/mcpize-oauth.ts). So the existing header-based resolveUserId()
+      // already is the real, working identity path for that traffic; the
+      // local oidc-provider fallback only matters when MCPize isn't in front
+      // (local dev / self-hosting).
+      const authorizationHeader = req.header("authorization");
+      const userId = (localOidcEnabled ? await resolveOAuthUserId(authorizationHeader) : null) ?? resolveUserId(req);
       const body = (req.body && typeof req.body === "object" ? req.body : {}) as {
         method?: string;
         id?: unknown;
@@ -424,17 +506,23 @@ async function startHttp(): Promise<void> {
       // clients can connect and list capabilities.
       const DATA_METHODS = new Set(["tools/call", "resources/read"]);
       if (!userId && method && DATA_METHODS.has(method)) {
-        res.status(200).json({
-          jsonrpc: "2.0",
-          id: body.id ?? null,
-          error: {
-            code: -32001,
-            message:
-              "No authenticated user identity on the request (missing " +
-              "x-mcpize-user-id / user token). This server refuses to read or " +
-              "write expense data without an identified user.",
-          },
-        });
+        // A real 401 + WWW-Authenticate (RFC 9728 handshake), not a 200
+        // JSON-RPC error body: this is what lets an MCP OAuth client (like
+        // Claude's connector flow) discover where to authenticate at all.
+        // Claude only honors this challenge on a genuine 401.
+        res
+          .status(401)
+          .set("WWW-Authenticate", `Bearer resource_metadata="${protectedResourceMetadataUrl(req)}"`)
+          .json({
+            jsonrpc: "2.0",
+            id: body.id ?? null,
+            error: {
+              code: -32001,
+              message:
+                "No authenticated user identity on the request. Connect via OAuth, " +
+                "or supply x-mcpize-user-id / a user token.",
+            },
+          });
         return;
       }
 

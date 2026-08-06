@@ -235,4 +235,16 @@ export class MemoryStore implements ExpenseStore {
     this.db.finance[userId] = structuredClone(state);
     this.persist();
   }
+
+  async deleteAllUserData(userId: string): Promise<{ expensesDeleted: number; budgetsDeleted: number }> {
+    const expensesBefore = this.db.expenses.length;
+    const budgetsBefore = this.db.budgets.length;
+    this.db.expenses = this.db.expenses.filter((e) => e.userId !== userId);
+    this.db.budgets = this.db.budgets.filter((b) => b.userId !== userId);
+    const expensesDeleted = expensesBefore - this.db.expenses.length;
+    const budgetsDeleted = budgetsBefore - this.db.budgets.length;
+    if (this.db.finance) delete this.db.finance[userId];
+    this.persist();
+    return { expensesDeleted, budgetsDeleted };
+  }
 }

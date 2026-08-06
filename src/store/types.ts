@@ -181,4 +181,12 @@ export interface ExpenseStore {
 
   getFinanceState(userId: string): Promise<FinanceState>;
   setFinanceState(userId: string, state: FinanceState): Promise<void>;
+
+  /**
+   * Permanently erases every expense, budget, and finance-state record for
+   * this user — the full data-deletion path the privacy policy promises.
+   * Does not touch account/activity history (app_users, app_activity in
+   * TursoStore), which is operational/audit data outside this interface.
+   */
+  deleteAllUserData(userId: string): Promise<{ expensesDeleted: number; budgetsDeleted: number }>;
 }
