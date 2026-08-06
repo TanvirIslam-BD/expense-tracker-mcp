@@ -1,4 +1,4 @@
-# Expense Tracker MCP — Knowledge Base
+# Money Copilot AI — Knowledge Base
 
 The single authoritative reference for this project: what it is, how it's built,
 every non-obvious decision, the incidents we hit and how they were resolved, and
