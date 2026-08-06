@@ -105,6 +105,17 @@ describe("MCP server (in-memory transport)", () => {
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
 
+    // Directory review checks specifically for a `title` *inside* annotations
+    // (the spec-documented ToolAnnotations.title), not just the top-level
+    // Tool.title the SDK also emits — easy to satisfy one and miss the other.
+    for (const tool of tools.tools) {
+      expect(tool.annotations?.title, `${tool.name} is missing annotations.title`).toBeTruthy();
+      expect(
+        tool.annotations?.readOnlyHint !== undefined || tool.annotations?.destructiveHint !== undefined,
+        `${tool.name} is missing readOnlyHint/destructiveHint`,
+      ).toBe(true);
+    }
+
     const resources = await client.listResources();
     expect(resources.resources.map((r) => r.uri).sort()).toEqual([
       "expense://recent",
