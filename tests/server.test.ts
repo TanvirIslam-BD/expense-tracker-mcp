@@ -17,6 +17,7 @@ const TOOL_NAMES = [
   "set_budget",
   "list_budgets",
   "delete_budget",
+  "delete_account",
   "get_budget_status",
   "list_categories",
   "full_budget_report",
@@ -292,6 +293,28 @@ describe("MCP server (in-memory transport)", () => {
 
     // Deleting a non-existent budget errors.
     expect(await isToolError(client, "delete_budget", { category: "nope" })).toBe(true);
+  });
+
+  it("delete_account wipes all expenses, budgets, and finance state for the user", async () => {
+    await call(client, "add_expense", { amount: 10, category: "food" });
+    await call(client, "add_expense", { amount: 20, category: "rent" });
+    await call(client, "set_budget", { amount: 500, category: "food" });
+    await call(client, "add_income", { amount: 1000, source: "Salary" });
+
+    const result = await call(client, "delete_account", { confirm: true });
+    const structured = result.structuredContent as any;
+    expect(structured.deleted).toBe(true);
+    expect(structured.expenses_deleted).toBe(2);
+    expect(structured.budgets_deleted).toBe(1);
+
+    expect((await call(client, "list_expenses", {})).structuredContent).toMatchObject({ count: 0, expenses: [] });
+    expect((await call(client, "list_budgets", {})).structuredContent).toMatchObject({ budgets: [] });
+    const cashFlow = jsonOf(await call(client, "get_cash_flow_report", {}));
+    expect(cashFlow.currencies).toEqual([]);
+
+    // Missing/false confirmation is rejected rather than silently no-op'd.
+    expect(await isToolError(client, "delete_account", {})).toBe(true);
+    expect(await isToolError(client, "delete_account", { confirm: false })).toBe(true);
   });
 
   it("summarizes spending grouped by category", async () => {

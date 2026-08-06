@@ -171,6 +171,37 @@ describe("TursoStore — budgets", () => {
   });
 });
 
+describe("TursoStore — deleteAllUserData", () => {
+  let store: TursoStore;
+
+  beforeEach(async () => {
+    store = new TursoStore("file::memory:");
+    await store.init();
+  });
+
+  it("wipes expenses, budgets, and finance state for one user without touching another", async () => {
+    await store.addExpenses([expense({ userId: "alice" }), expense({ userId: "alice" }), expense({ userId: "bob" })]);
+    await store.setBudget({ userId: "alice", category: "food", amountMinor: 10000, currency: "USD" });
+    await store.setBudget({ userId: "bob", category: "food", amountMinor: 5000, currency: "USD" });
+    await store.setFinanceState("alice", { ...(await store.getFinanceState("alice")), notificationEmail: "alice@example.com" });
+
+    const result = await store.deleteAllUserData("alice");
+    expect(result).toEqual({ expensesDeleted: 2, budgetsDeleted: 1 });
+
+    expect(await store.listExpenses("alice")).toEqual([]);
+    expect(await store.listBudgets("alice")).toEqual([]);
+    expect((await store.getFinanceState("alice")).notificationEmail).toBeUndefined();
+
+    // Bob's data survives untouched.
+    expect((await store.listExpenses("bob")).length).toBe(1);
+    expect((await store.listBudgets("bob")).length).toBe(1);
+  });
+
+  it("is a safe no-op for a user with no data", async () => {
+    expect(await store.deleteAllUserData("nobody")).toEqual({ expensesDeleted: 0, budgetsDeleted: 0 });
+  });
+});
+
 describe("TursoStore — persistence across restarts (the scale-to-zero fix)", () => {
   let dir: string;
 

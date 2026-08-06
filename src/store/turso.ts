@@ -406,6 +406,20 @@ export class TursoStore implements ExpenseStore {
     });
   }
 
+  async deleteAllUserData(userId: string): Promise<{ expensesDeleted: number; budgetsDeleted: number }> {
+    // One atomic batch so a mid-delete failure can't leave expenses gone but
+    // budgets/finance_state still present (or vice versa).
+    const [expensesResult, budgetsResult] = await this.client.batch(
+      [
+        { sql: "DELETE FROM expenses WHERE user_id = ?", args: [userId] },
+        { sql: "DELETE FROM budgets WHERE user_id = ?", args: [userId] },
+        { sql: "DELETE FROM finance_state WHERE user_id = ?", args: [userId] },
+      ],
+      "write",
+    );
+    return { expensesDeleted: Number(expensesResult.rowsAffected), budgetsDeleted: Number(budgetsResult.rowsAffected) };
+  }
+
   /** Releases the underlying connection/file handle. Mainly useful for tests. */
   close(): void {
     this.client.close();
