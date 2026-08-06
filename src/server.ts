@@ -663,6 +663,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.add_expense,
       outputSchema: TOOL_OUTPUTS.add_expense,
       annotations: {
+        title: "Add expense",
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
@@ -713,6 +714,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.add_expenses,
       outputSchema: TOOL_OUTPUTS.add_expenses,
       annotations: {
+        title: "Add multiple expenses",
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
@@ -769,6 +771,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.list_expenses,
       outputSchema: TOOL_OUTPUTS.list_expenses,
       annotations: {
+        title: "List expenses",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -823,6 +826,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.get_expense,
       outputSchema: TOOL_OUTPUTS.get_expense,
       annotations: {
+        title: "Get expense",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -849,6 +853,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.get_recent_expense,
       outputSchema: TOOL_OUTPUTS.get_recent_expense,
       annotations: {
+        title: "Get most recent expense",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -882,6 +887,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.update_expense,
       outputSchema: TOOL_OUTPUTS.update_expense,
       annotations: {
+        title: "Update expense",
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
@@ -923,6 +929,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.delete_expense,
       outputSchema: TOOL_OUTPUTS.delete_expense,
       annotations: {
+        title: "Delete expense",
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
@@ -947,6 +954,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.summarize_expenses,
       outputSchema: TOOL_OUTPUTS.summarize_expenses,
       annotations: {
+        title: "Summarize expenses",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -1032,6 +1040,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.set_budget,
       outputSchema: TOOL_OUTPUTS.set_budget,
       annotations: {
+        title: "Set budget",
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
@@ -1084,6 +1093,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: {},
       outputSchema: TOOL_OUTPUTS.list_budgets,
       annotations: {
+        title: "List budgets",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -1120,6 +1130,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.delete_budget,
       outputSchema: TOOL_OUTPUTS.delete_budget,
       annotations: {
+        title: "Delete budget",
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
@@ -1153,6 +1164,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.delete_account,
       outputSchema: TOOL_OUTPUTS.delete_account,
       annotations: {
+        title: "Delete all account data",
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
@@ -1182,6 +1194,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.get_budget_status,
       outputSchema: TOOL_OUTPUTS.get_budget_status,
       annotations: {
+        title: "Get budget status",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -1266,6 +1279,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: {},
       outputSchema: TOOL_OUTPUTS.list_categories,
       annotations: {
+        title: "List categories",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -1389,6 +1403,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.full_budget_report,
       outputSchema: TOOL_OUTPUTS.full_budget_report,
       annotations: {
+        title: "Full budget and expense report with charts",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -1503,7 +1518,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
   // Advanced finance-management tools. Their state is kept in the store's
   // durable per-user finance document, while expense rows remain queryable via
   // the existing indexed table.
-  server.registerTool("set_budget_email_alert", { title: "Configure budget-limit email alerts", description: "Enable or disable an email when a monthly budget is crossed. Email is sent only if the server has RESEND_API_KEY and BUDGET_ALERT_EMAIL_FROM configured.", inputSchema: TOOL_INPUTS.set_budget_email_alert, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ email, enabled }) => {
+  server.registerTool("set_budget_email_alert", { title: "Configure budget-limit email alerts", description: "Enable or disable an email when a monthly budget is crossed. Email is sent only if the server has RESEND_API_KEY and BUDGET_ALERT_EMAIL_FROM configured.", inputSchema: TOOL_INPUTS.set_budget_email_alert, annotations: { title: "Configure budget-limit email alerts", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ email, enabled }) => {
     if (enabled && !email) return fail("email is required when enabling alerts.");
     const state = await store.getFinanceState(userId);
     state.emailAlertsEnabled = enabled;
@@ -1517,7 +1532,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     title: "Open private finance dashboard",
     description: "Create a short-lived link to the authenticated user's private /dashboard page.",
     inputSchema: z.object({}),
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { title: "Open private finance dashboard", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
     const baseUrl = (process.env.DASHBOARD_WEB_URL || process.env.EXPENSE_TRACKER_WEB_URL || process.env.PUBLIC_BASE_URL)?.replace(/\/$/, "");
     const secret = process.env.DASHBOARD_SESSION_SECRET;
@@ -1527,7 +1542,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     return text(`Open your private dashboard: ${url}\n\nThis link expires in 15 minutes.`, { url, expires_in_minutes: 15 });
   });
 
-  server.registerTool("add_income", { title: "Add income", description: "Record income for cash-flow and savings reports.", inputSchema: TOOL_INPUTS.add_income, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ amount, source, date, currency, notes }) => {
+  server.registerTool("add_income", { title: "Add income", description: "Record income for cash-flow and savings reports.", inputSchema: TOOL_INPUTS.add_income, annotations: { title: "Add income", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ amount, source, date, currency, notes }) => {
     const d = date ?? todayISO(); const cur = currencyOrError(currency);
     if (!isValidDate(d)) return fail(`Invalid date "${d}".`);
     if (!cur) return fail("Currency must be a 3-letter ISO code, e.g. USD.");
@@ -1537,7 +1552,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     return text(`Added income ${formatMoney(income.amountMinor, cur)} from ${income.source}.`, { ...income, amount: toMajor(income.amountMinor) });
   });
 
-  server.registerTool("set_recurring_expense", { title: "Set recurring expense", description: "Create or update a recurring rent, subscription, utility, or loan expense.", inputSchema: TOOL_INPUTS.set_recurring_expense, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ amount, category, description, merchant, frequency, next_date, currency, active }) => {
+  server.registerTool("set_recurring_expense", { title: "Set recurring expense", description: "Create or update a recurring rent, subscription, utility, or loan expense.", inputSchema: TOOL_INPUTS.set_recurring_expense, annotations: { title: "Set recurring expense", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ amount, category, description, merchant, frequency, next_date, currency, active }) => {
     const cur = currencyOrError(currency); if (!cur) return fail("Currency must be a 3-letter ISO code, e.g. USD.");
     if (!isValidDate(next_date)) return fail(`Invalid next_date "${next_date}".`);
     const state = await store.getFinanceState(userId);
@@ -1549,7 +1564,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     return text(`Saved ${frequency} recurring expense ${formatMoney(entry.amountMinor, cur)} (${entry.category}).`, { ...entry, amount: toMajor(entry.amountMinor) });
   });
 
-  server.registerTool("split_expense", { title: "Split expense", description: "Record one purchase split across two or more categories.", inputSchema: TOOL_INPUTS.split_expense, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ total_amount, date, currency, merchant, description, splits }) => {
+  server.registerTool("split_expense", { title: "Split expense", description: "Record one purchase split across two or more categories.", inputSchema: TOOL_INPUTS.split_expense, annotations: { title: "Split expense", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ total_amount, date, currency, merchant, description, splits }) => {
     const d = date ?? todayISO(); const cur = currencyOrError(currency);
     if (!isValidDate(d)) return fail(`Invalid date "${d}".`); if (!cur) return fail("Currency must be a 3-letter ISO code, e.g. USD.");
     const splitMinor = splits.reduce((sum, split) => sum + toMinor(split.amount), 0);
@@ -1558,7 +1573,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     return text(`Added ${created.length} split expense entries totalling ${formatMoney(splitMinor, cur)}.`, { count: created.length, expenses: created.map(view) });
   });
 
-  server.registerTool("import_expenses", { title: "Import expenses from CSV", description: "Import CSV columns amount, category, date, description, currency; duplicate rows can be skipped.", inputSchema: TOOL_INPUTS.import_expenses, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ csv, on_duplicate }) => {
+  server.registerTool("import_expenses", { title: "Import expenses from CSV", description: "Import CSV columns amount, category, date, description, currency; duplicate rows can be skipped.", inputSchema: TOOL_INPUTS.import_expenses, annotations: { title: "Import expenses from CSV", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ csv, on_duplicate }) => {
     const lines = csv.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean); if (lines.length < 2) return fail("CSV needs a header and at least one data row.");
     const header = lines[0].split(",").map((value) => value.trim().toLowerCase());
     const index = (name: string) => header.indexOf(name); if (index("amount") < 0) return fail("CSV must contain an amount column.");
@@ -1574,7 +1589,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     const created = await store.addExpenses(prepared); return text(`Imported ${created.length} expense(s); skipped ${skipped}.`, { imported: created.map(view), skipped });
   });
 
-  server.registerTool("manage_categories", { title: "Manage categories", description: "List, create, update, or remove custom category limits and colors.", inputSchema: TOOL_INPUTS.manage_categories, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ action, category, limit, currency, color }) => {
+  server.registerTool("manage_categories", { title: "Manage categories", description: "List, create, update, or remove custom category limits and colors.", inputSchema: TOOL_INPUTS.manage_categories, annotations: { title: "Manage categories", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ action, category, limit, currency, color }) => {
     const state = await store.getFinanceState(userId); if (action === "list") return text(jsonBlock(state.categories), { categories: state.categories.map((entry) => ({ ...entry, limit: entry.limitMinor == null ? undefined : toMajor(entry.limitMinor) })) });
     if (!category?.trim()) return fail("category is required for upsert or delete."); const name = category.trim().toLowerCase();
     if (action === "delete") { state.categories = state.categories.filter((entry) => entry.category !== name); await store.setFinanceState(userId, state); return text(`Deleted category settings for ${name}.`); }
@@ -1582,38 +1597,38 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     const next = { category: name, limitMinor: limit == null ? undefined : toMinor(limit), currency: cur ?? undefined, color }; const old = state.categories.find((entry) => entry.category === name); if (old) Object.assign(old, next); else state.categories.push(next); await store.setFinanceState(userId, state); return text(`Saved category ${name}.`, { ...next, limit: limit });
   });
 
-  server.registerTool("set_alert_thresholds", { title: "Set budget alert thresholds", description: "Set the percentage thresholds that trigger budget alerts.", inputSchema: TOOL_INPUTS.set_alert_thresholds, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ thresholds }) => {
+  server.registerTool("set_alert_thresholds", { title: "Set budget alert thresholds", description: "Set the percentage thresholds that trigger budget alerts.", inputSchema: TOOL_INPUTS.set_alert_thresholds, annotations: { title: "Set budget alert thresholds", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ thresholds }) => {
     const state = await store.getFinanceState(userId); state.alertThresholds = [...new Set(thresholds)].sort((a, b) => a - b); await store.setFinanceState(userId, state); return text(`Saved alert thresholds: ${state.alertThresholds.join("%, ")}%.`, { thresholds: state.alertThresholds });
   });
 
-  server.registerTool("get_cash_flow_report", { title: "Get cash-flow report", description: "Report income, expenses, net cash flow, and savings rate for a month.", inputSchema: TOOL_INPUTS.get_cash_flow_report, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
+  server.registerTool("get_cash_flow_report", { title: "Get cash-flow report", description: "Report income, expenses, net cash flow, and savings rate for a month.", inputSchema: TOOL_INPUTS.get_cash_flow_report, annotations: { title: "Get cash-flow report", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
     const m = month ?? currentMonth(); if (!isValidMonth(m)) return fail(`Invalid month "${m}".`); const range = monthRange(m); const [expenses, state] = await Promise.all([store.listExpenses(userId, range), store.getFinanceState(userId)]);
     const income = state.incomes.filter((entry) => entry.date >= range.from && entry.date <= range.to); const currencies = new Set([...expenses.map((e) => e.currency), ...income.map((e) => e.currency)]); const result = [...currencies].sort().map((currency) => { const earned = income.filter((e) => e.currency === currency).reduce((sum, e) => sum + e.amountMinor, 0); const spent = expenses.filter((e) => e.currency === currency).reduce((sum, e) => sum + e.amountMinor, 0); return { currency, income: toMajor(earned), expenses: toMajor(spent), net: toMajor(earned - spent), savings_rate: earned ? Math.round(((earned - spent) / earned) * 1000) / 10 : null }; });
     const structured = { month: m, currencies: result }; return text(`Cash flow for ${m}.\n\n${jsonBlock(structured)}`, structured);
   });
 
-  server.registerTool("get_spending_forecast", { title: "Get spending forecast", description: "Forecast month-end spending and remaining daily budget from spending so far.", inputSchema: TOOL_INPUTS.get_spending_forecast, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
+  server.registerTool("get_spending_forecast", { title: "Get spending forecast", description: "Forecast month-end spending and remaining daily budget from spending so far.", inputSchema: TOOL_INPUTS.get_spending_forecast, annotations: { title: "Get spending forecast", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
     const m = month ?? currentMonth(); if (!isValidMonth(m)) return fail(`Invalid month "${m}".`); const range = monthRange(m); const [expenses, budgets] = await Promise.all([store.listExpenses(userId, range), store.listBudgets(userId)]); const elapsed = m === currentMonth() ? Math.max(1, Number(todayISO().slice(8, 10))) : daysInMonth(m); const result = Object.entries(totalsByCurrency(expenses)).map(([currency, spent]) => { const forecast = Math.round((spent / elapsed) * daysInMonth(m)); const overall = budgets.find((b) => b.category === null && b.currency === currency); return { currency, spent: toMajor(spent), forecast: toMajor(forecast), remaining_daily_budget: overall ? toMajor((overall.amountMinor - spent) / Math.max(1, daysInMonth(m) - elapsed)) : null }; }); const structured = { month: m, forecasts: result }; return text(`Spending forecast for ${m}.\n\n${jsonBlock(structured)}`, structured);
   });
 
-  server.registerTool("compare_months", { title: "Compare monthly spending", description: "Compare expenses across recent months, with a trend chart data series.", inputSchema: TOOL_INPUTS.compare_months, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ months, currency }) => {
+  server.registerTool("compare_months", { title: "Compare monthly spending", description: "Compare expenses across recent months, with a trend chart data series.", inputSchema: TOOL_INPUTS.compare_months, annotations: { title: "Compare monthly spending", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ months, currency }) => {
     const cur = currency ? currencyOrError(currency) : null; if (currency && !cur) return fail("Currency must be a 3-letter ISO code, e.g. USD."); const series = [] as { month: string; totals: Record<string, number> }[];
     for (let offset = months - 1; offset >= 0; offset--) { const m = previousMonth(currentMonth(), offset); const entries = await store.listExpenses(userId, monthRange(m)); const totals = totalsByCurrency(cur ? entries.filter((e) => e.currency === cur) : entries); series.push({ month: m, totals: Object.fromEntries(Object.entries(totals).map(([code, minor]) => [code, toMajor(minor)])) }); }
     const structured = { months: series, chart: { type: "line", series } }; return { content: [{ type: "text", text: `Spending comparison for ${months} months.\n\n${jsonBlock(structured)}` }, svgImage(trendChartSvg(series))], structuredContent: structured };
   });
 
-  server.registerTool("get_budget_alerts", { title: "Get budget alerts", description: "List configured threshold alerts and over-budget categories.", inputSchema: TOOL_INPUTS.get_budget_alerts, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
+  server.registerTool("get_budget_alerts", { title: "Get budget alerts", description: "List configured threshold alerts and over-budget categories.", inputSchema: TOOL_INPUTS.get_budget_alerts, annotations: { title: "Get budget alerts", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
     const m = month ?? currentMonth(); if (!isValidMonth(m)) return fail(`Invalid month "${m}".`); const [expenses, budgets, state] = await Promise.all([store.listExpenses(userId, monthRange(m)), store.listBudgets(userId), store.getFinanceState(userId)]); const alerts = budgets.flatMap((budget) => { const spent = expenses.filter((e) => e.currency === budget.currency && (budget.category === null || e.category === budget.category)).reduce((sum, e) => sum + e.amountMinor, 0); const percent = (spent / budget.amountMinor) * 100; return state.alertThresholds.filter((threshold) => percent >= threshold).map((threshold) => ({ scope: budget.category ?? "overall", currency: budget.currency, threshold, percent_used: Math.round(percent * 10) / 10, over_budget: spent > budget.amountMinor })); }); const structured = { month: m, alerts }; return text(alerts.length ? `Budget alerts for ${m}.\n\n${jsonBlock(structured)}` : `No budget alerts for ${m}.`, structured);
   });
 
-  server.registerTool("find_duplicate_expenses", { title: "Find duplicate expenses", description: "Find likely duplicate expenses with the same date, category, amount, currency, and description.", inputSchema: TOOL_INPUTS.find_duplicate_expenses, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ from, to }) => {
+  server.registerTool("find_duplicate_expenses", { title: "Find duplicate expenses", description: "Find likely duplicate expenses with the same date, category, amount, currency, and description.", inputSchema: TOOL_INPUTS.find_duplicate_expenses, annotations: { title: "Find duplicate expenses", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ from, to }) => {
     if ((from && !isValidDate(from)) || (to && !isValidDate(to)) || (from && to && from > to)) return fail("Use a valid chronological YYYY-MM-DD date range.");
     const expenses = await store.listExpenses(userId, { from, to, limit: 5000 }); const grouped = new Map<string, typeof expenses>();
     for (const expense of expenses) { const key = [expense.date, expense.amountMinor, expense.currency, expense.category, expense.description.trim().toLowerCase()].join("|"); const rows = grouped.get(key) ?? []; rows.push(expense); grouped.set(key, rows); }
     const duplicates = [...grouped.values()].filter((rows) => rows.length > 1).map((rows) => rows.map(view)); return text(duplicates.length ? `Found ${duplicates.length} likely duplicate group(s).\n\n${jsonBlock(duplicates)}` : "No likely duplicates found.", { duplicates });
   });
 
-  server.registerTool("manage_budget_templates", { title: "Manage budget templates", description: "Save, apply, list, or delete reusable student, family, business, or custom budget templates.", inputSchema: TOOL_INPUTS.manage_budget_templates, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ action, name, template }) => {
+  server.registerTool("manage_budget_templates", { title: "Manage budget templates", description: "Save, apply, list, or delete reusable student, family, business, or custom budget templates.", inputSchema: TOOL_INPUTS.manage_budget_templates, annotations: { title: "Manage budget templates", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ action, name, template }) => {
     const state = await store.getFinanceState(userId); if (action === "list") return text(jsonBlock(state.templates), { templates: state.templates }); if (!name?.trim()) return fail("name is required."); const key = name.trim().toLowerCase();
     if (action === "delete") { state.templates = state.templates.filter((entry) => entry.name !== key); await store.setFinanceState(userId, state); return text(`Deleted template ${key}.`); }
     if (action === "save") { if (!template?.length) return fail("template rules are required to save."); const rules = template.map((rule) => ({ category: rule.category?.trim().toLowerCase() ?? null, amountMinor: toMinor(rule.amount), currency: currencyOrError(rule.currency) ?? DEFAULT_CURRENCY, period: rule.period, rollover: rule.rollover })); const existing = state.templates.find((entry) => entry.name === key); if (existing) existing.rules = rules; else state.templates.push({ name: key, rules }); await store.setFinanceState(userId, state); return text(`Saved template ${key}.`, { name: key, rules: template }); }
@@ -1628,6 +1643,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       inputSchema: TOOL_INPUTS.export_expenses,
       outputSchema: TOOL_OUTPUTS.export_expenses,
       annotations: {
+        title: "Export expenses",
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
