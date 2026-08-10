@@ -4,6 +4,7 @@
  * use. Guards against the GET /mcp change breaking an existing client.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:8801";
@@ -45,7 +46,19 @@ check("prompts/get", prompt.messages.length > 0);
 
 await client.close();
 
-// --- 2. The GET /mcp stream itself ----------------------------------------
+// --- 2. Legacy SSE compatibility used by OpenAI's scanner -----------------
+console.log("\n=== Legacy GET /mcp/sse client ===");
+const legacyTransport = new SSEClientTransport(new URL(`${BASE}/mcp/sse`), {
+  requestInit: { headers: { "x-user-id": "regression-user" } },
+});
+const legacyClient = new Client({ name: "legacy-regression", version: "1.0.0" });
+await legacyClient.connect(legacyTransport);
+check("connect + initialize through /mcp/sse", true);
+const legacyTools = await legacyClient.listTools();
+check("legacy tools/list", legacyTools.tools.length === 32, `${legacyTools.tools.length} tools`);
+await legacyClient.close();
+
+// --- 3. The GET /mcp stream itself ----------------------------------------
 console.log("\n=== GET /mcp SSE stream ===");
 const controller = new AbortController();
 const sse = await fetch(`${BASE}/mcp`, { headers: { Accept: "text/event-stream" }, signal: controller.signal });
@@ -57,7 +70,7 @@ check("emits an initial SSE comment", new TextDecoder().decode(first.value).star
 controller.abort();
 try { await reader.cancel(); } catch {}
 
-// --- 3. Unchanged behaviours ---------------------------------------------
+// --- 4. Unchanged behaviours ---------------------------------------------
 console.log("\n=== unchanged behaviour ===");
 const del = await fetch(`${BASE}/mcp`, { method: "DELETE" });
 check("DELETE /mcp still 405", del.status === 405, `got ${del.status}`);

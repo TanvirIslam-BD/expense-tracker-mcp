@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import os from "node:os";
@@ -581,6 +582,135 @@ async function startHttp(): Promise<void> {
       }
     } catch (err) {
       console.error("[mcp] request error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal server error" },
+          id: null,
+        });
+      }
+    }
+  });
+
+  /**
+   * Legacy HTTP+SSE compatibility for clients that probe `<mcp-url>/sse`.
+   *
+   * Streamable HTTP at POST /mcp remains the primary transport. OpenAI's
+   * submission scanner currently also requests GET /mcp/sse; without this
+   * compatibility pair that probe receives a 404 even though initialize and
+   * every discovery method on POST /mcp succeed.
+   */
+  const legacySseSessions = new Map<
+    string,
+    {
+      transport: SSEServerTransport;
+      server: ReturnType<typeof buildServer>;
+      userId: string;
+    }
+  >();
+
+  app.get("/mcp/sse", async (req: Request, res: Response) => {
+    try {
+      const authorizationHeader = req.header("authorization");
+      const userId = (localOidcEnabled ? await resolveOAuthUserId(authorizationHeader) : null) ?? resolveUserId(req);
+      if (!userId) {
+        res
+          .status(401)
+          .set("WWW-Authenticate", `Bearer resource_metadata="${protectedResourceMetadataUrl(req)}"`)
+          .json({
+            jsonrpc: "2.0",
+            error: { code: -32001, message: "Authentication is required to open an MCP SSE session." },
+            id: null,
+          });
+        return;
+      }
+
+      const server = buildServer(store, userId);
+      const transport = new SSEServerTransport("/mcp/messages", res);
+      legacySseSessions.set(transport.sessionId, { transport, server, userId });
+      res.once("close", () => {
+        const current = legacySseSessions.get(transport.sessionId);
+        if (current?.transport === transport) legacySseSessions.delete(transport.sessionId);
+        void transport.close();
+        void server.close();
+      });
+      await server.connect(transport);
+    } catch (error) {
+      console.error("[mcp-sse] connection error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Unable to open MCP SSE session." },
+          id: null,
+        });
+      } else {
+        res.end();
+      }
+    }
+  });
+
+  app.post("/mcp/messages", async (req: Request, res: Response) => {
+    try {
+      const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : "";
+      const session = legacySseSessions.get(sessionId);
+      if (!session) {
+        res.status(404).json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Unknown or expired MCP SSE session." },
+          id: null,
+        });
+        return;
+      }
+
+      const authorizationHeader = req.header("authorization");
+      const userId = (localOidcEnabled ? await resolveOAuthUserId(authorizationHeader) : null) ?? resolveUserId(req);
+      if (!userId) {
+        res
+          .status(401)
+          .set("WWW-Authenticate", `Bearer resource_metadata="${protectedResourceMetadataUrl(req)}"`)
+          .json({
+            jsonrpc: "2.0",
+            error: { code: -32001, message: "Authentication is required for this MCP SSE session." },
+            id: null,
+          });
+        return;
+      }
+      if (userId !== session.userId) {
+        res.status(403).json({
+          jsonrpc: "2.0",
+          error: { code: -32003, message: "This MCP SSE session belongs to a different user." },
+          id: null,
+        });
+        return;
+      }
+
+      const body = (req.body && typeof req.body === "object" ? req.body : {}) as {
+        method?: string;
+        params?: { name?: string };
+      };
+      const dataMethods = new Set(["tools/call", "resources/read"]);
+      if (body.method && dataMethods.has(body.method)) {
+        const status = await store.getUserAccessStatus(userId);
+        if (status === "suspended") {
+          res.status(200).json({
+            jsonrpc: "2.0",
+            error: { code: -32003, message: "This account has been suspended. Contact Money Copilot AI support." },
+            id: null,
+          });
+          return;
+        }
+      }
+
+      await session.transport.handlePostMessage(req, res, req.body);
+      if (body.method && dataMethods.has(body.method)) {
+        try {
+          await store.recordActivity(userId, "mcp", body.params?.name || body.method, { method: body.method });
+        } catch (activityError) {
+          console.error("[mcp-sse] activity logging failed:", activityError);
+        }
+      }
+    } catch (error) {
+      console.error("[mcp-sse] message error:", error);
       if (!res.headersSent) {
         res.status(500).json({
           jsonrpc: "2.0",
