@@ -1,0 +1,440 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "Money Copilot AI",
+    "subtitle": "Track expenses and budgets",
+    "description": "Money Copilot AI helps users record and organize expenses and income, set budgets and alerts, review reports and forecasts, manage recurring spending, and export private finance data through ChatGPT.",
+    "category": "FINANCE"
+  },
+  "tools": {
+    "add_expense": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates a new private expense record and may update its associated metadata.",
+        "open_world_justification": "Can send a budget-limit alert email through the configured email provider when the new expense crosses a budget.",
+        "destructive_justification": "Can send an irreversible budget-alert email when alerts are enabled and the expense crosses a configured limit."
+      }
+    },
+    "add_expenses": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates multiple private expense records in the user's data store.",
+        "open_world_justification": "Only writes expense records in the user's private store and does not contact external systems.",
+        "destructive_justification": "Appends new expense records without deleting or overwriting existing records."
+      }
+    },
+    "list_expenses": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves matching private expense records and computes totals.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "get_expense": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves one private expense record by its identifier.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "get_recent_expense": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves the most recent matching private expense record.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "update_expense": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes provided fields on an existing private expense record.",
+        "open_world_justification": "Only changes the user's private expense store and does not contact external systems.",
+        "destructive_justification": "Overwrites selected fields of an existing expense without retaining their previous values."
+      }
+    },
+    "delete_expense": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes an existing private expense record.",
+        "open_world_justification": "Only changes the user's private expense store and does not contact external systems.",
+        "destructive_justification": "Permanently removes the selected expense record."
+      }
+    },
+    "summarize_expenses": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expense records and computes grouped totals.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "set_budget": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates or updates a private overall or category budget.",
+        "open_world_justification": "Only changes budget data in the user's private store and does not contact external systems.",
+        "destructive_justification": "Can overwrite an existing matching budget configuration."
+      }
+    },
+    "list_budgets": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves the user's private monthly budget records.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "delete_budget": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes an existing private monthly budget.",
+        "open_world_justification": "Only changes budget data in the user's private store and does not contact external systems.",
+        "destructive_justification": "Permanently removes the selected overall or category budget."
+      }
+    },
+    "delete_account": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes all private expense, budget, and finance-state records for the user.",
+        "open_world_justification": "Only deletes data from the app's private store and does not change public or third-party systems.",
+        "destructive_justification": "Permanently and irreversibly erases all supported finance data for the user after explicit confirmation."
+      }
+    },
+    "get_budget_status": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private budgets and expenses to calculate monthly status values.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "list_categories": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expense data and computes category counts and totals.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "full_budget_report": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private finance data and computes report, forecast, and chart results.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "set_budget_email_alert": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes the user's stored email-alert preferences and recipient address.",
+        "open_world_justification": "Configures a private app preference but does not itself send email or change public internet state.",
+        "destructive_justification": "Can overwrite alert preferences and clears prior delivery-deduplication state when alerts are disabled."
+      }
+    },
+    "get_dashboard_link": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Computes a short-lived signed dashboard URL without persisting or changing application state.",
+        "open_world_justification": "Returns a private link and does not publish content or change an external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "add_income": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a new private income record for cash-flow reporting.",
+        "open_world_justification": "Only writes income data in the user's private store and does not contact external systems.",
+        "destructive_justification": "Appends a new income record without deleting or overwriting existing records."
+      }
+    },
+    "set_recurring_expense": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates or updates a private recurring-expense configuration.",
+        "open_world_justification": "Only changes recurring-expense data in the user's private store and does not contact external systems.",
+        "destructive_justification": "Can overwrite an existing recurring-expense configuration."
+      }
+    },
+    "split_expense": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates multiple private expense records representing one split purchase.",
+        "open_world_justification": "Only writes expense records in the user's private store and does not contact external systems.",
+        "destructive_justification": "Appends new split records without deleting or overwriting existing records."
+      }
+    },
+    "import_expenses": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates private expense records from supplied CSV data.",
+        "open_world_justification": "Only writes imported records in the user's private store and does not contact external systems.",
+        "destructive_justification": "Appends imported records and does not delete or overwrite existing records."
+      }
+    },
+    "manage_categories": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Can list, create, update, or delete private category settings.",
+        "open_world_justification": "Only changes category settings in the user's private store and does not contact external systems.",
+        "destructive_justification": "Can overwrite or permanently remove a category configuration."
+      }
+    },
+    "set_alert_thresholds": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Replaces the user's stored budget-alert threshold configuration.",
+        "open_world_justification": "Only changes alert settings in the user's private store and does not contact external systems.",
+        "destructive_justification": "Overwrites the previous threshold list with the supplied values."
+      }
+    },
+    "get_cash_flow_report": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expense and income data to compute monthly cash flow.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "get_spending_forecast": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expenses and budgets to calculate a spending forecast.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "compare_months": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expense data to compute monthly totals and trend chart data.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "get_budget_alerts": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expenses, budgets, and threshold settings to calculate alerts.",
+        "open_world_justification": "Does not send notifications, publish data, or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "find_duplicate_expenses": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expense records and groups likely duplicates.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete or alter the duplicate records it identifies."
+      }
+    },
+    "manage_budget_templates": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Can list, save, apply, or delete private budget templates and create budgets from them.",
+        "open_world_justification": "Only changes templates and budgets in the user's private store and does not contact external systems.",
+        "destructive_justification": "Can overwrite or delete a template and can overwrite matching budgets when applying one."
+      }
+    },
+    "export_expenses": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads private expense records and formats them as CSV, JSON, or PDF data.",
+        "open_world_justification": "Returns export data to the user without publishing it or changing an external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Record a single categorized expense.",
+      "user_prompt": "Record a $12.50 lunch expense in the food category for today.",
+      "file_attachment_urls": null,
+      "tools_triggered": "add_expense",
+      "expected_output": "Confirms the new expense with its amount, category, date, currency, and identifier.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Find expenses within a date range using a text filter.",
+      "user_prompt": "List my coffee expenses from August 1 through August 10, 2026.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_expenses",
+      "expected_output": "Returns only matching expenses with totals, or clearly states that no records match.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create or replace a non-monthly budget.",
+      "user_prompt": "Set an overall yearly budget of $24,000 with reset rollover.",
+      "file_attachment_urls": null,
+      "tools_triggered": "set_budget",
+      "expected_output": "Confirms the yearly overall budget, amount, currency, period, and rollover behavior.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Generate a complete monthly finance report.",
+      "user_prompt": "Give me my full budget report with charts for July 2026.",
+      "file_attachment_urls": null,
+      "tools_triggered": "full_budget_report",
+      "expected_output": "Returns monthly totals, category and budget details, forecasts, and chart data or images when available.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Export a bounded set of expenses as a portable report.",
+      "user_prompt": "Export my expenses from January through June 2026 as a PDF.",
+      "file_attachment_urls": null,
+      "tools_triggered": "export_expenses",
+      "expected_output": "Returns a portable PDF payload for the requested date range and reports the exported record count.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not trigger for investment-market information.",
+      "user_prompt": "What is the current price of Apple stock?",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it does not provide market prices or investment research.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for banking transactions.",
+      "user_prompt": "Transfer $500 from my checking account to my savings account.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it cannot access bank accounts or move money.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for receipt OCR without a finance action.",
+      "user_prompt": "Extract every line of text from this receipt image, but do not record any expenses.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because receipt OCR is handled by the host model and no expense action was requested.",
+      "expected_output_url": null
+    }
+  ]
+}

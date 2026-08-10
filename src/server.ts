@@ -659,15 +659,18 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       title: "Add expense",
       description:
         "Record a new expense. Amount is a positive decimal in major units " +
-        "(e.g. 12.50). Date defaults to today.",
+        "(e.g. 12.50). Date defaults to today. If budget-limit email alerts " +
+        "are enabled and this entry crosses a monthly budget, the server also " +
+        "sends an alert email with budget and spending details through the " +
+        "configured email provider.",
       inputSchema: TOOL_INPUTS.add_expense,
       outputSchema: TOOL_OUTPUTS.add_expense,
       annotations: {
         title: "Add expense",
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
     async ({ amount, category, description, date, currency, merchant, payment_method, tags }) => {
@@ -889,7 +892,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       annotations: {
         title: "Update expense",
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: true,
         openWorldHint: false,
       },
@@ -1034,15 +1037,15 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Set budget",
       description:
-        "Set a monthly budget. Omit category for an overall budget; provide a " +
-        "category for a per-category budget. Re-setting overwrites the existing " +
-        "budget for that category.",
+        "Set a weekly, monthly, yearly, or custom budget. Omit category for an " +
+        "overall budget; provide a category for a per-category budget. Re-setting " +
+        "a matching budget overwrites its existing configuration.",
       inputSchema: TOOL_INPUTS.set_budget,
       outputSchema: TOOL_OUTPUTS.set_budget,
       annotations: {
         title: "Set budget",
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: true,
         openWorldHint: false,
       },
@@ -1518,7 +1521,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
   // Advanced finance-management tools. Their state is kept in the store's
   // durable per-user finance document, while expense rows remain queryable via
   // the existing indexed table.
-  server.registerTool("set_budget_email_alert", { title: "Configure budget-limit email alerts", description: "Enable or disable an email when a monthly budget is crossed. Email is sent only if the server has RESEND_API_KEY and BUDGET_ALERT_EMAIL_FROM configured.", inputSchema: TOOL_INPUTS.set_budget_email_alert, annotations: { title: "Configure budget-limit email alerts", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ email, enabled }) => {
+  server.registerTool("set_budget_email_alert", { title: "Configure budget-limit email alerts", description: "Enable or disable an email when a monthly budget is crossed. Email is sent only if the server has RESEND_API_KEY and BUDGET_ALERT_EMAIL_FROM configured.", inputSchema: TOOL_INPUTS.set_budget_email_alert, annotations: { title: "Configure budget-limit email alerts", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ email, enabled }) => {
     if (enabled && !email) return fail("email is required when enabling alerts.");
     const state = await store.getFinanceState(userId);
     state.emailAlertsEnabled = enabled;
@@ -1552,7 +1555,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     return text(`Added income ${formatMoney(income.amountMinor, cur)} from ${income.source}.`, { ...income, amount: toMajor(income.amountMinor) });
   });
 
-  server.registerTool("set_recurring_expense", { title: "Set recurring expense", description: "Create or update a recurring rent, subscription, utility, or loan expense.", inputSchema: TOOL_INPUTS.set_recurring_expense, annotations: { title: "Set recurring expense", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ amount, category, description, merchant, frequency, next_date, currency, active }) => {
+  server.registerTool("set_recurring_expense", { title: "Set recurring expense", description: "Create or update a recurring rent, subscription, utility, or loan expense.", inputSchema: TOOL_INPUTS.set_recurring_expense, annotations: { title: "Set recurring expense", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ amount, category, description, merchant, frequency, next_date, currency, active }) => {
     const cur = currencyOrError(currency); if (!cur) return fail("Currency must be a 3-letter ISO code, e.g. USD.");
     if (!isValidDate(next_date)) return fail(`Invalid next_date "${next_date}".`);
     const state = await store.getFinanceState(userId);
@@ -1597,7 +1600,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     const next = { category: name, limitMinor: limit == null ? undefined : toMinor(limit), currency: cur ?? undefined, color }; const old = state.categories.find((entry) => entry.category === name); if (old) Object.assign(old, next); else state.categories.push(next); await store.setFinanceState(userId, state); return text(`Saved category ${name}.`, { ...next, limit: limit });
   });
 
-  server.registerTool("set_alert_thresholds", { title: "Set budget alert thresholds", description: "Set the percentage thresholds that trigger budget alerts.", inputSchema: TOOL_INPUTS.set_alert_thresholds, annotations: { title: "Set budget alert thresholds", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ thresholds }) => {
+  server.registerTool("set_alert_thresholds", { title: "Set budget alert thresholds", description: "Set the percentage thresholds that trigger budget alerts.", inputSchema: TOOL_INPUTS.set_alert_thresholds, annotations: { title: "Set budget alert thresholds", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ thresholds }) => {
     const state = await store.getFinanceState(userId); state.alertThresholds = [...new Set(thresholds)].sort((a, b) => a - b); await store.setFinanceState(userId, state); return text(`Saved alert thresholds: ${state.alertThresholds.join("%, ")}%.`, { thresholds: state.alertThresholds });
   });
 
