@@ -13,6 +13,9 @@ import {
   categorize,
   resolveCategory,
   view,
+  budgetWindowFor,
+  priorBudgetWindows,
+  advanceRecurringDate,
 } from "../src/util.js";
 import type { Expense } from "../src/store/types.js";
 import { createDashboardSessionToken, verifyDashboardSessionToken } from "../src/dashboard-auth.js";
@@ -172,5 +175,52 @@ describe("view", () => {
     });
     expect(v).not.toHaveProperty("userId");
     expect(v).not.toHaveProperty("amountMinor");
+  });
+});
+
+describe("budget period windows", () => {
+  it("resolves the window a budget applies to", () => {
+    expect(budgetWindowFor({ period: "monthly" }, "2026-08-17")).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+    expect(budgetWindowFor({ period: "monthly" }, "2028-02-10")).toEqual({ from: "2028-02-01", to: "2028-02-29" }); // leap
+    expect(budgetWindowFor({ period: "yearly" }, "2026-08-17")).toEqual({ from: "2026-01-01", to: "2026-12-31" });
+    // ISO week (Mon-Sun) when unanchored; 2026-08-17 is a Monday.
+    expect(budgetWindowFor({ period: "weekly" }, "2026-08-17")).toEqual({ from: "2026-08-17", to: "2026-08-23" });
+    expect(budgetWindowFor({ period: "weekly" }, "2026-08-16")).toEqual({ from: "2026-08-10", to: "2026-08-16" });
+    // Anchored weeks keep the rule's own start day rather than jumping to Monday.
+    expect(budgetWindowFor({ period: "weekly", startDate: "2026-08-06" }, "2026-08-17")).toEqual({ from: "2026-08-13", to: "2026-08-19" });
+  });
+
+  it("returns null when a rule does not cover the date", () => {
+    expect(budgetWindowFor({ period: "weekly", startDate: "2026-09-01" }, "2026-08-17")).toBeNull();
+    expect(budgetWindowFor({ period: "custom", startDate: "2026-08-01", endDate: "2026-08-31" }, "2026-09-02")).toBeNull();
+    expect(budgetWindowFor({ period: "custom", startDate: "2026-08-01" }, "2026-08-17")).toBeNull(); // no end date
+  });
+
+  it("walks completed windows for carry rollover", () => {
+    expect(priorBudgetWindows({ period: "monthly", startDate: "2026-06-01" }, "2026-08-17"))
+      .toEqual([{ from: "2026-06-01", to: "2026-06-30" }, { from: "2026-07-01", to: "2026-07-31" }]);
+    // Anchored in the current window, so nothing has completed yet.
+    expect(priorBudgetWindows({ period: "monthly", startDate: "2026-08-01" }, "2026-08-17")).toEqual([]);
+    // Custom periods do not repeat, so they never carry.
+    expect(priorBudgetWindows({ period: "custom", startDate: "2026-01-01", endDate: "2026-12-31" }, "2026-08-17")).toEqual([]);
+    // A far-back anchor must terminate rather than spin.
+    expect(priorBudgetWindows({ period: "weekly", startDate: "2000-01-01" }, "2026-08-17").length).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("recurring schedules", () => {
+  it("advances by frequency", () => {
+    expect(advanceRecurringDate("2026-08-17", "weekly")).toBe("2026-08-24");
+    expect(advanceRecurringDate("2026-08-17", "monthly")).toBe("2026-09-17");
+    expect(advanceRecurringDate("2026-08-17", "yearly")).toBe("2027-08-17");
+    expect(advanceRecurringDate("2026-12-31", "monthly")).toBe("2027-01-31"); // year rollover
+    expect(advanceRecurringDate("2026-12-31", "weekly")).toBe("2027-01-07");
+  });
+
+  it("clamps to the target month's length", () => {
+    expect(advanceRecurringDate("2026-01-31", "monthly")).toBe("2026-02-28");
+    expect(advanceRecurringDate("2028-01-31", "monthly")).toBe("2028-02-29"); // leap year
+    expect(advanceRecurringDate("2026-03-31", "monthly")).toBe("2026-04-30");
+    expect(advanceRecurringDate("2028-02-29", "yearly")).toBe("2029-02-28"); // leap -> non-leap
   });
 });
