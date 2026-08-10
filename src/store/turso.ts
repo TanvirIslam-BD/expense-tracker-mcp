@@ -116,6 +116,32 @@ export class TursoStore implements ExpenseStore {
     return String(result.rows[0]?.status || "active") === "suspended" ? "suspended" : "active";
   }
 
+  /**
+   * Whether the dashboard already holds a name and a contact address.
+   *
+   * `chosen_display_name` is the name the user typed for themselves and
+   * `display_name` is whatever was resolved from MCPize; either counts. The email
+   * can only have come from the user, since MCPize exposes no email column.
+   *
+   * Both columns are added by the dashboard's own migration, so a database that
+   * predates it will error here -- and that is reported as "has details", because
+   * an unreachable or older database must not put a nag on every tool result.
+   */
+  async hasContactDetails(userId: string): Promise<boolean> {
+    try {
+      const result = await this.client.execute({
+        sql: `SELECT COALESCE(NULLIF(chosen_display_name,''), display_name, '') AS name, COALESCE(email,'') AS email
+              FROM app_users WHERE user_id = ? LIMIT 1`,
+        args: [userId],
+      });
+      const row = result.rows[0];
+      if (!row) return false;
+      return Boolean(String(row.name || "").trim()) && Boolean(String(row.email || "").trim());
+    } catch {
+      return true;
+    }
+  }
+
   async recordActivity(userId: string, source: string, eventType: string, detail: Record<string, unknown> = {}): Promise<void> {
     const now = new Date().toISOString();
     let encoded = "{}";
