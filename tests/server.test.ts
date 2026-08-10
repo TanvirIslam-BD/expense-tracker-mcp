@@ -45,6 +45,13 @@ function textOf(result: CallToolResult): string {
     .join("\n");
 }
 
+/** Decode the first SVG image block a tool returned. */
+function imageOf(result: CallToolResult): string {
+  const image = (result.content ?? []).find((c) => c.type === "image");
+  if (!image || image.type !== "image") throw new Error("no image content in result");
+  return Buffer.from(image.data as string, "base64").toString("utf8");
+}
+
 /** Parse the last ```json ... ``` fenced block out of a tool's text result. */
 function jsonOf(result: CallToolResult): any {
   const text = textOf(result);
@@ -486,5 +493,124 @@ describe("MCP server (in-memory transport)", () => {
     const body = JSON.parse(res.contents[0].text as string);
     expect(body.month).toMatch(/^\d{4}-\d{2}$/);
     expect(body.count).toBeGreaterThanOrEqual(1);
+  });
+
+  // --- regressions: silently-wrong results --------------------------------
+  // Each of these passed a "did it return something" check while quietly
+  // losing or zeroing data, so they assert on the actual payload.
+
+  it("plots real amounts in the compare_months trend chart", async () => {
+    await call(client, "add_expense", { amount: 125, category: "food" }); // current month
+    const result = await call(client, "compare_months", { months: 3 });
+    const svg = imageOf(result);
+
+    // The currency must reach the title — it used to resolve to the array
+    // index "0", which made every totals lookup miss.
+    expect(svg).toContain("Monthly spending trend (USD)");
+    expect(svg).not.toContain("trend (0)");
+
+    // At least one plotted value must be non-zero, and the polyline must not
+    // sit flat on the baseline (y=230) for every point.
+    const labels = [...svg.matchAll(/class="muted">([\d.]+)</g)].map((m) => Number(m[1]));
+    expect(labels.some((value) => value > 0)).toBe(true);
+    const yValues = svg.match(/<polyline points="([^"]*)"/)![1].split(" ").map((p) => Number(p.split(",")[1]));
+    expect(new Set(yValues).size).toBeGreaterThan(1);
+  });
+
+  it("exports every expense to PDF across multiple pages", async () => {
+    const count = 60; // more than one page holds
+    for (let i = 0; i < count; i += 20) {
+      await call(client, "add_expenses", {
+        expenses: Array.from({ length: 20 }, (_, j) => ({
+          amount: i + j + 1,
+          category: "food",
+          date: "2026-07-01",
+          description: `marker${i + j}`,
+        })),
+      });
+    }
+
+    const exported = jsonOf(await call(client, "export_expenses", { format: "pdf" }));
+    expect(exported.count).toBe(count);
+    const pdf = Buffer.from(exported.pdf_base64, "base64").toString("utf8");
+
+    // Every row the tool counted must actually be in the document.
+    for (let i = 0; i < count; i++) expect(pdf).toContain(`marker${i}`);
+    expect(pdf).toMatch(/\/Count [2-9]/); // paginated, not clipped to one page
+    expect(pdf).toContain("page 1 of");
+  });
+
+  it("reports CSV rows it could not process instead of dropping them", async () => {
+    const limit = 5000;
+    const rows = Array.from({ length: limit + 3 }, () => "1.00,food,2026-07-01,bulk");
+    const result = await call(client, "import_expenses", {
+      csv: ["amount,category,date,description", ...rows].join("\n"),
+      on_duplicate: "allow",
+    });
+
+    expect(result.structuredContent).toMatchObject({ not_processed: 3, row_limit: limit });
+    expect(textOf(result)).toContain("NOT processed");
+    expect(jsonOf(await call(client, "list_expenses", { limit: 1 })).length).toBe(1);
+  });
+
+  it("sends budget alerts for bulk writes, not just single add_expense", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = process.env.RESEND_API_KEY;
+    const originalFrom = process.env.BUDGET_ALERT_EMAIL_FROM;
+    const subjects: string[] = [];
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.BUDGET_ALERT_EMAIL_FROM = "Alerts <alerts@example.com>";
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      subjects.push(JSON.parse(String(init.body)).subject);
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      await call(client, "set_budget_email_alert", { email: "user@example.com" });
+      await call(client, "set_budget", { amount: 10, category: "food" });
+      await call(client, "set_budget", { amount: 10, category: "shopping" });
+      await call(client, "set_budget", { amount: 10, category: "travel" });
+
+      // Each of these crosses a different category budget, and none of them
+      // used to notify at all — only add_expense did.
+      await call(client, "add_expenses", { expenses: [{ amount: 50, category: "food", date: "2026-07-02" }] });
+      await call(client, "split_expense", {
+        total_amount: 60, date: "2026-07-03",
+        splits: [{ category: "shopping", amount: 30 }, { category: "shopping", amount: 30 }],
+      });
+      await call(client, "import_expenses", { csv: "amount,category,date\n40,travel,2026-07-04" });
+
+      expect(subjects).toEqual([
+        "Budget limit crossed: food (2026-07)",
+        "Budget limit crossed: shopping (2026-07)",
+        "Budget limit crossed: travel (2026-07)",
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
+      if (originalFrom === undefined) delete process.env.BUDGET_ALERT_EMAIL_FROM; else process.env.BUDGET_ALERT_EMAIL_FROM = originalFrom;
+    }
+  });
+
+  it("sends a budget alert when update_expense pushes spending over the limit", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = process.env.RESEND_API_KEY;
+    const originalFrom = process.env.BUDGET_ALERT_EMAIL_FROM;
+    let calls = 0;
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.BUDGET_ALERT_EMAIL_FROM = "Alerts <alerts@example.com>";
+    globalThis.fetch = (async () => { calls++; return new Response("{}", { status: 200 }); }) as typeof fetch;
+    try {
+      await call(client, "set_budget_email_alert", { email: "user@example.com" });
+      await call(client, "set_budget", { amount: 100, category: "food" });
+      const added = jsonOf(await call(client, "add_expense", { amount: 5, category: "food", date: "2026-07-02" }));
+      expect(calls).toBe(0);
+
+      await call(client, "update_expense", { id: added.id, amount: 250 });
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
+      if (originalFrom === undefined) delete process.env.BUDGET_ALERT_EMAIL_FROM; else process.env.BUDGET_ALERT_EMAIL_FROM = originalFrom;
+    }
   });
 });

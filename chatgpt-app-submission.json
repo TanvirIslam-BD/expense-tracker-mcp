@@ -1,10 +1,10 @@
 {
-  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "$schema": "https://developers.openai.com/plugins/schemas/chatgpt-app-submission.v1.json",
   "schema_version": 1,
   "app_info": {
     "display_name": "Money Copilot AI",
     "subtitle": "Track expenses and budgets",
-    "description": "Money Copilot AI helps users record and organize expenses and income, set budgets and alerts, review reports and forecasts, manage recurring spending, and export private finance data through ChatGPT.",
+    "description": "Money Copilot AI helps users record and organize expenses and income, set monthly budgets and alerts, review reports and forecasts, and export private finance data through ChatGPT.",
     "category": "FINANCE"
   },
   "tools": {
@@ -23,13 +23,13 @@
     "add_expenses": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates multiple private expense records in the user's data store.",
-        "open_world_justification": "Only writes expense records in the user's private store and does not contact external systems.",
-        "destructive_justification": "Appends new expense records without deleting or overwriting existing records."
+        "open_world_justification": "Can send a budget-limit alert email through the configured email provider when the added expenses cross a budget.",
+        "destructive_justification": "Appends new expense records without overwriting existing ones, but can send an irreversible budget-alert email when alerts are enabled and a limit is crossed."
       }
     },
     "list_expenses": {
@@ -71,13 +71,13 @@
     "update_expense": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Changes provided fields on an existing private expense record.",
-        "open_world_justification": "Only changes the user's private expense store and does not contact external systems.",
-        "destructive_justification": "Overwrites selected fields of an existing expense without retaining their previous values."
+        "open_world_justification": "Can send a budget-limit alert email through the configured email provider when the change crosses a budget.",
+        "destructive_justification": "Overwrites selected fields of an existing expense without retaining their previous values, and can send an irreversible budget-alert email when a limit is crossed."
       }
     },
     "delete_expense": {
@@ -239,25 +239,25 @@
     "split_expense": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates multiple private expense records representing one split purchase.",
-        "open_world_justification": "Only writes expense records in the user's private store and does not contact external systems.",
-        "destructive_justification": "Appends new split records without deleting or overwriting existing records."
+        "open_world_justification": "Can send a budget-limit alert email through the configured email provider when the split crosses a budget.",
+        "destructive_justification": "Appends new split records without overwriting existing ones, but can send an irreversible budget-alert email when alerts are enabled and a limit is crossed."
       }
     },
     "import_expenses": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates private expense records from supplied CSV data.",
-        "open_world_justification": "Only writes imported records in the user's private store and does not contact external systems.",
-        "destructive_justification": "Appends imported records and does not delete or overwrite existing records."
+        "open_world_justification": "Can send a budget-limit alert email through the configured email provider when the imported records cross a budget.",
+        "destructive_justification": "Appends imported records without overwriting existing ones, but can send an irreversible budget-alert email when alerts are enabled and a limit is crossed."
       }
     },
     "manage_categories": {
@@ -387,11 +387,11 @@
       "expected_output_url": null
     },
     {
-      "description": "Create or replace a non-monthly budget.",
-      "user_prompt": "Set an overall yearly budget of $24,000 with reset rollover.",
+      "description": "Create or replace a monthly category budget.",
+      "user_prompt": "Set a monthly food budget of $400.",
       "file_attachment_urls": null,
       "tools_triggered": "set_budget",
-      "expected_output": "Confirms the yearly overall budget, amount, currency, period, and rollover behavior.",
+      "expected_output": "Confirms the monthly food budget with its amount and currency; the budget is then returned by list_budgets and tracked by get_budget_status.",
       "expected_output_url": null
     },
     {

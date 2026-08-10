@@ -25,6 +25,10 @@ const DEFAULT_CURRENCY = (process.env.DEFAULT_CURRENCY || "USD")
   .toUpperCase()
   .slice(0, 3);
 
+/** Most CSV data rows `import_expenses` will process in a single call. Matches
+ *  the window used to look up existing expenses for duplicate detection. */
+const MAX_IMPORT_ROWS = 5000;
+
 // --- small render helpers ---------------------------------------------------
 
 type ToolResult = {
@@ -136,14 +140,41 @@ function budgetChartSvg(month: string, currency: string, rows: { scope: string; 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Budget versus spending, ${escapeXml(currency)}"><style>text{font-family:Arial,sans-serif;fill:#172033}.title{font-size:21px;font-weight:700}.label{font-size:14px;font-weight:600}.muted{font-size:13px;fill:#526075}</style><rect width="100%" height="100%" rx="16" fill="#f8fafc"/><text x="28" y="40" class="title">Budget vs. spending — ${escapeXml(month)} (${escapeXml(currency)})</text><text x="28" y="64" class="muted">Blue = spent; black marker = budget; red = over budget</text>${renderedRows}</svg>`;
 }
 
-/** Minimal standards-compliant, text-only PDF for a portable report download. */
+/** Rows per page: y starts at 780 and steps down 15pt per line, so this many
+ *  expense rows plus a heading stay clear of the bottom margin on US Letter. */
+const PDF_ROWS_PER_PAGE = 46;
+
+/**
+ * Minimal standards-compliant, text-only PDF for a portable report download.
+ * Paginates across as many pages as the data needs — a long export must never
+ * be silently clipped, since the caller reports the full row count alongside it.
+ */
 function reportPdfBase64(title: string, lines: string[]): string {
   const escape = (value: string) => value.replace(/[\\()]/g, "\\$&").replace(/[^\x20-\x7E]/g, "?");
-  const body = [title, ...lines].slice(0, 48).map((line, index) => `BT /F1 ${index === 0 ? 18 : 10} Tf 48 ${780 - index * 15} Td (${escape(line)}) Tj ET`).join("\n");
-  const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", `<< /Length ${Buffer.byteLength(body)} >>\nstream\n${body}\nendstream`];
-  let pdf = "%PDF-1.4\n"; const offsets = [0];
+  const pages: string[][] = [];
+  for (let i = 0; i < lines.length; i += PDF_ROWS_PER_PAGE) pages.push(lines.slice(i, i + PDF_ROWS_PER_PAGE));
+  if (pages.length === 0) pages.push([]);
+
+  // Object numbering: 1 catalog, 2 page tree, 3 font, then one Page object per
+  // page, then one content stream per page (each Page points at its stream).
+  const firstPageObject = 4;
+  const firstContentObject = firstPageObject + pages.length;
+  const contents = pages.map((rows, page) => [
+    pages.length > 1 ? `${title} (page ${page + 1} of ${pages.length})` : title,
+    ...rows,
+  ].map((line, index) => `BT /F1 ${index === 0 ? 18 : 10} Tf 48 ${780 - index * 15} Td (${escape(line)}) Tj ET`).join("\n"));
+
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pages.map((_, i) => `${firstPageObject + i} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ...pages.map((_, i) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${firstContentObject + i} 0 R >>`),
+    ...contents.map((body) => `<< /Length ${Buffer.byteLength(body)} >>\nstream\n${body}\nendstream`),
+  ];
+
+  let pdf = "%PDF-1.4\n"; const offsets: number[] = [];
   objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf)); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
-  const start = Buffer.byteLength(pdf); pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
+  const start = Buffer.byteLength(pdf); pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
   return Buffer.from(pdf, "utf8").toString("base64");
 }
 
@@ -275,7 +306,10 @@ function fullDashboardBudgetAlertEmailHtml(input: {
 }
 
 function trendChartSvg(series: { month: string; totals: Record<string, number> }[]): string {
-  const currency = Object.keys(series.flatMap((point) => Object.keys(point.totals)))[0];
+  // `flatMap` already yields currency codes. Wrapping it in Object.keys would
+  // return array *indices* ("0", "1", …), so every totals lookup missed and the
+  // chart rendered a flat zero line whatever the real spending was.
+  const currency = series.flatMap((point) => Object.keys(point.totals))[0];
   const values = series.map((point) => currency ? point.totals[currency] ?? 0 : 0); const max = Math.max(1, ...values);
   const points = values.map((value, index) => `${60 + index * (640 / Math.max(1, values.length - 1))},${230 - (value / max) * 150}`).join(" ");
   const labels = series.map((point, index) => `<text x="${60 + index * (640 / Math.max(1, series.length - 1))}" y="260" text-anchor="middle" class="label">${escapeXml(point.month)}</text>`).join("");
@@ -695,7 +729,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         state.expenseMetadata[expense.id] = { merchant, paymentMethod: payment_method, tags: tags?.map((tag) => tag.trim().toLowerCase()) };
         await store.setFinanceState(userId, state);
       }
-      await notifyBudgetLimitCrossed(d.slice(0, 7));
+      await notifyBudgetLimitCrossedForMonths([d.slice(0, 7)]);
 
       return text(
         `Added ${formatMoney(expense.amountMinor, expense.currency)} for ` +
@@ -713,15 +747,17 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       description:
         "Record several expenses in one call — efficient for a receipt with " +
         "many line items or logging a whole day's spending at once. Each item " +
-        "takes the same fields as add_expense.",
+        "takes the same fields as add_expense. If budget-limit email alerts are " +
+        "enabled and these entries cross a monthly budget, the server also sends " +
+        "an alert email through the configured email provider.",
       inputSchema: TOOL_INPUTS.add_expenses,
       outputSchema: TOOL_OUTPUTS.add_expenses,
       annotations: {
         title: "Add multiple expenses",
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
     async ({ expenses }) => {
@@ -747,6 +783,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       }
 
       const created = await store.addExpenses(prepared);
+      await notifyBudgetLimitCrossedForMonths(created.map((expense) => expense.date.slice(0, 7)));
       const totals = totalsByCurrency(created);
       const structured = {
         count: created.length,
@@ -886,7 +923,10 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Update expense",
       description:
-        "Update fields of an existing expense. Only provided fields change.",
+        "Update fields of an existing expense. Only provided fields change. If " +
+        "budget-limit email alerts are enabled and the change crosses a monthly " +
+        "budget, the server also sends an alert email through the configured " +
+        "email provider.",
       inputSchema: TOOL_INPUTS.update_expense,
       outputSchema: TOOL_OUTPUTS.update_expense,
       annotations: {
@@ -894,7 +934,7 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
     async ({ id, amount, category, description, date, currency }) => {
@@ -919,6 +959,10 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       });
       if (!updated) return fail(`No expense found with id ${id}.`);
 
+      // Raising an amount (or moving an expense into another month) can cross a
+      // limit just as an insert can. Only the destination month needs checking:
+      // spending in the month an expense moved out of can only go down.
+      await notifyBudgetLimitCrossedForMonths([updated.date.slice(0, 7)]);
       const viewed = view(updated);
       return text(`Updated expense ${id}.\n\n` + jsonBlock(viewed), viewed);
     },
@@ -1037,9 +1081,11 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Set budget",
       description:
-        "Set a weekly, monthly, yearly, or custom budget. Omit category for an " +
-        "overall budget; provide a category for a per-category budget. Re-setting " +
-        "a matching budget overwrites its existing configuration.",
+        "Set a monthly budget. Omit category for an overall budget; provide a " +
+        "category for a per-category budget. Re-setting a matching budget " +
+        "overwrites its existing configuration. Note: weekly, yearly, and custom " +
+        "periods are recorded but are not yet reflected in budget status, alerts, " +
+        "or reports — use monthly for budgets you want tracked.",
       inputSchema: TOOL_INPUTS.set_budget,
       outputSchema: TOOL_OUTPUTS.set_budget,
       annotations: {
@@ -1315,6 +1361,24 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     },
   );
 
+  /**
+   * Fire budget-limit alerts for every month a write touched. Bulk writes
+   * (add_expenses, split_expense, import_expenses) can cross a limit just as
+   * easily as a single add, and can span more than one month, so every write
+   * path routes through here rather than alerting only on add_expense.
+   *
+   * Gated on the provider env vars up front so servers without email
+   * configured — the common case — skip the finance-state read entirely.
+   */
+  async function notifyBudgetLimitCrossedForMonths(months: Iterable<string>): Promise<void> {
+    if (!process.env.RESEND_API_KEY || !process.env.BUDGET_ALERT_EMAIL_FROM) return;
+    const unique = [...new Set(months)].filter(isValidMonth).sort();
+    if (unique.length === 0) return;
+    const state = await store.getFinanceState(userId);
+    if (!state.emailAlertsEnabled || !state.notificationEmail) return;
+    for (const month of unique) await notifyBudgetLimitCrossed(month);
+  }
+
   /** Send each budget-limit alert at most once per month/scope/currency. */
   async function notifyBudgetLimitCrossed(month: string): Promise<void> {
     const apiKey = process.env.RESEND_API_KEY;
@@ -1567,21 +1631,26 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     return text(`Saved ${frequency} recurring expense ${formatMoney(entry.amountMinor, cur)} (${entry.category}).`, { ...entry, amount: toMajor(entry.amountMinor) });
   });
 
-  server.registerTool("split_expense", { title: "Split expense", description: "Record one purchase split across two or more categories.", inputSchema: TOOL_INPUTS.split_expense, annotations: { title: "Split expense", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ total_amount, date, currency, merchant, description, splits }) => {
+  server.registerTool("split_expense", { title: "Split expense", description: "Record one purchase split across two or more categories. If budget-limit email alerts are enabled and the split crosses a monthly budget, the server also sends an alert email through the configured email provider.", inputSchema: TOOL_INPUTS.split_expense, annotations: { title: "Split expense", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } }, async ({ total_amount, date, currency, merchant, description, splits }) => {
     const d = date ?? todayISO(); const cur = currencyOrError(currency);
     if (!isValidDate(d)) return fail(`Invalid date "${d}".`); if (!cur) return fail("Currency must be a 3-letter ISO code, e.g. USD.");
     const splitMinor = splits.reduce((sum, split) => sum + toMinor(split.amount), 0);
     if (splitMinor !== toMinor(total_amount)) return fail("Split amounts must equal total_amount exactly.");
     const created = await store.addExpenses(splits.map((split) => ({ userId, amountMinor: toMinor(split.amount), currency: cur, category: resolveCategory(split.category, description), description: [merchant, description].filter(Boolean).join(" — "), date: d })));
+    await notifyBudgetLimitCrossedForMonths([d.slice(0, 7)]);
     return text(`Added ${created.length} split expense entries totalling ${formatMoney(splitMinor, cur)}.`, { count: created.length, expenses: created.map(view) });
   });
 
-  server.registerTool("import_expenses", { title: "Import expenses from CSV", description: "Import CSV columns amount, category, date, description, currency; duplicate rows can be skipped.", inputSchema: TOOL_INPUTS.import_expenses, annotations: { title: "Import expenses from CSV", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async ({ csv, on_duplicate }) => {
+  server.registerTool("import_expenses", { title: "Import expenses from CSV", description: `Import CSV columns amount, category, date, description, currency; duplicate rows can be skipped. Processes up to ${MAX_IMPORT_ROWS} data rows per call and reports any beyond that as not_processed. If budget-limit email alerts are enabled and the import crosses a monthly budget, the server also sends an alert email through the configured email provider.`, inputSchema: TOOL_INPUTS.import_expenses, annotations: { title: "Import expenses from CSV", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } }, async ({ csv, on_duplicate }) => {
     const lines = csv.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean); if (lines.length < 2) return fail("CSV needs a header and at least one data row.");
     const header = lines[0].split(",").map((value) => value.trim().toLowerCase());
     const index = (name: string) => header.indexOf(name); if (index("amount") < 0) return fail("CSV must contain an amount column.");
     const existing = await store.listExpenses(userId, { limit: 5000 }); const prepared: { userId: string; amountMinor: number; currency: string; category: string; description: string; date: string }[] = []; let skipped = 0;
-    for (const line of lines.slice(1, 1001)) {
+    // Rows beyond the cap are reported back, never dropped in silence: the
+    // caller needs to know an import was partial so it can send the remainder.
+    const dataLines = lines.slice(1);
+    const notProcessed = Math.max(0, dataLines.length - MAX_IMPORT_ROWS);
+    for (const line of dataLines.slice(0, MAX_IMPORT_ROWS)) {
       const values = line.match(/(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^,]*))/g)?.map((part) => part.replace(/^,/, "").replace(/^"|"$/g, "").replace(/""/g, '"')) ?? [];
       const amount = Number(values[index("amount")]?.replace(/[,$\s]/g, "")); const d = values[index("date")] || todayISO(); const cur = currencyOrError(values[index("currency")] || undefined);
       if (!isSafeMoneyAmount(amount) || !isValidDate(d) || !cur) { skipped++; continue; }
@@ -1589,7 +1658,16 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       if (on_duplicate === "skip" && existing.some((e) => e.amountMinor === minor && e.date === d && e.currency === cur && e.category === category && e.description === description)) { skipped++; continue; }
       prepared.push({ userId, amountMinor: minor, currency: cur, category, description, date: d });
     }
-    const created = await store.addExpenses(prepared); return text(`Imported ${created.length} expense(s); skipped ${skipped}.`, { imported: created.map(view), skipped });
+    const created = await store.addExpenses(prepared);
+    await notifyBudgetLimitCrossedForMonths(created.map((expense) => expense.date.slice(0, 7)));
+    return text(
+      `Imported ${created.length} expense(s); skipped ${skipped}.` +
+        (notProcessed
+          ? ` ${notProcessed} row(s) were NOT processed — this tool imports at most ` +
+            `${MAX_IMPORT_ROWS} rows per call. Re-run with the remaining rows.`
+          : ""),
+      { imported: created.map(view), skipped, not_processed: notProcessed, row_limit: MAX_IMPORT_ROWS },
+    );
   });
 
   server.registerTool("manage_categories", { title: "Manage categories", description: "List, create, update, or remove custom category limits and colors.", inputSchema: TOOL_INPUTS.manage_categories, annotations: { title: "Manage categories", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } }, async ({ action, category, limit, currency, color }) => {
