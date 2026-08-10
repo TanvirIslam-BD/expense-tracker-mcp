@@ -291,6 +291,41 @@ async function startHttp(): Promise<void> {
     });
   }
 
+  /*
+   * TEMPORARY DIAGNOSTIC -- remove once the identity question is settled.
+   *
+   * Settles whether MCPize forwards any identity beyond the subscriber UUID.
+   * Everything else it gives us is a bare id: the OAuth access token carries only
+   * iss/sub/aud/scope/client_id, its authorization server advertises no
+   * openid/profile/email scope and no userinfo endpoint, and its profiles table
+   * exposes no email column. If nothing identity-shaped arrives here either, then
+   * asking the user is the only route -- and this is the evidence for asking
+   * MCPize to change that.
+   *
+   * A previous capture in KNOWLEDGE_BASE.md ended in "...", so it cannot answer
+   * the question: the truncation may well have hidden the interesting header.
+   *
+   * Header NAMES only, never values. `authorization` is a live bearer token,
+   * `x-mcp-turso-database-url` is a database credential, and an address or a name
+   * would be the user's personal data. The names alone answer the question --
+   * `x-mcpize-user-email` existing at all is the finding, not what is in it.
+   */
+  if (process.env.LOG_REQUEST_HEADERS) {
+    const IDENTITY_HINT = /mail|name|profile|user|sub|given|family|picture|avatar/i;
+    app.use((req, _res, next) => {
+      const names = Object.keys(req.headers).sort();
+      console.error(`[headers] ${req.method} ${req.path} ${JSON.stringify({
+        names,
+        // Narrows a long list to the ones worth reading, and reports only that
+        // they carry something -- never what.
+        identityish: names
+          .filter((name) => IDENTITY_HINT.test(name))
+          .map((name) => `${name}${String(req.headers[name] || "").trim() ? "=set" : "=empty"}`),
+      })}`);
+      next();
+    });
+  }
+
   // Permissive CORS so browser-based and proxied MCP clients can connect.
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", req.header("origin") || "*");
