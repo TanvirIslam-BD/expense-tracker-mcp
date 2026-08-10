@@ -591,6 +591,55 @@ describe("MCP server (in-memory transport)", () => {
     }
   });
 
+  it("embeds alert-email artwork as CID attachments, not gated hosted URLs", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = process.env.RESEND_API_KEY;
+    const originalFrom = process.env.BUDGET_ALERT_EMAIL_FROM;
+    const originalBase = process.env.PUBLIC_BASE_URL;
+    let payload: any = null;
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.BUDGET_ALERT_EMAIL_FROM = "Alerts <alerts@example.com>";
+    process.env.PUBLIC_BASE_URL = "https://expense-tracker-mcp.mcpize.run";
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      payload = JSON.parse(String(init.body));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      await call(client, "set_budget_email_alert", { email: "user@example.com" });
+      await call(client, "set_budget", { amount: 10, category: "food" });
+      await call(client, "add_expense", { amount: 50, category: "food", date: "2026-07-05" });
+
+      expect(payload, "no email was sent").not.toBeNull();
+
+      // Every image must resolve to an embedded attachment...
+      const attachments = payload.attachments ?? [];
+      expect(attachments.map((a: any) => a.content_id).sort()).toEqual([
+        "budget-alert-hero",
+        "expense-tracker-logo-dark",
+        "expense-tracker-logo-light",
+      ]);
+      for (const cid of ["budget-alert-hero", "expense-tracker-logo-dark", "expense-tracker-logo-light"]) {
+        expect(payload.html, `cid:${cid} missing from html`).toContain(`cid:${cid}`);
+      }
+
+      // ...and no image may point at the gated /assets path, which 401s.
+      expect(payload.html).not.toContain("/assets/email/");
+      expect(payload.html).not.toContain("__HERO_SRC__");
+      expect(payload.html).not.toContain("__LOGO_DARK_SRC__");
+      expect(payload.html).not.toContain("__LOGO_LIGHT_SRC__");
+
+      // Payload must stay small enough to actually deliver. The original
+      // full-resolution art was ~5 MB of base64 per message.
+      const bytes = attachments.reduce((sum: number, a: any) => sum + a.content.length, 0);
+      expect(bytes).toBeLessThan(400 * 1024);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
+      if (originalFrom === undefined) delete process.env.BUDGET_ALERT_EMAIL_FROM; else process.env.BUDGET_ALERT_EMAIL_FROM = originalFrom;
+      if (originalBase === undefined) delete process.env.PUBLIC_BASE_URL; else process.env.PUBLIC_BASE_URL = originalBase;
+    }
+  });
+
   it("sends a budget alert when update_expense pushes spending over the limit", async () => {
     const originalFetch = globalThis.fetch;
     const originalKey = process.env.RESEND_API_KEY;

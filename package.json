@@ -11,7 +11,8 @@
     "expense-tracker-mcp": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "assets"
   ],
   "scripts": {
     "build": "tsc",

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { createDashboardSessionToken } from "./dashboard-auth.js";
 import type { ExpenseStore } from "./store/types.js";
@@ -28,6 +29,63 @@ const DEFAULT_CURRENCY = (process.env.DEFAULT_CURRENCY || "USD")
 /** Most CSV data rows `import_expenses` will process in a single call. Matches
  *  the window used to look up existing expenses for duplicate detection. */
 const MAX_IMPORT_ROWS = 5000;
+
+/**
+ * Email artwork, embedded as CID attachments.
+ *
+ * Hosted `/assets/...` URLs do not work: the platform gateway in front of this
+ * app requires a bearer token on every path except `/.well-known/*`, so the
+ * unauthenticated fetch an email client (or Gmail's image proxy) makes gets a
+ * 401 and the recipient sees broken images. Embedding sidesteps the gate.
+ *
+ * These are deliberately small, email-sized derivatives of the full-resolution
+ * source art: the originals are 1254x1254 logos rendered at 28px and a
+ * 1024x1536 hero, which would put ~5 MB of base64 in every alert.
+ */
+const EMAIL_ASSETS = [
+  { file: "hero-email.jpg", contentId: "budget-alert-hero", contentType: "image/jpeg" },
+  { file: "logo-dark-email.png", contentId: "expense-tracker-logo-dark", contentType: "image/png" },
+  { file: "logo-light-email.png", contentId: "expense-tracker-logo-light", contentType: "image/png" },
+] as const;
+
+type InlineEmailAsset = { content: string; filename: string; content_id: string; content_type: string };
+
+/** `assets/` sits one level above both `src/` and `dist/`, so this resolves
+ *  identically whether we run from source (tests) or the compiled build —
+ *  unlike a process.cwd() path, which breaks when started from elsewhere. */
+function emailAssetPath(file: string): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "assets", "email", file);
+}
+
+/** Reads the artwork for CID embedding, or null if it isn't available. */
+async function loadInlineEmailAssets(): Promise<InlineEmailAsset[] | null> {
+  try {
+    return await Promise.all(
+      EMAIL_ASSETS.map(async ({ file, contentId, contentType }) => ({
+        content: (await readFile(emailAssetPath(file))).toString("base64"),
+        filename: file,
+        content_id: contentId,
+        content_type: contentType,
+      })),
+    );
+  } catch (error) {
+    console.error(
+      "[email-alert] inline artwork unavailable, falling back to hosted URLs " +
+        "(these 401 behind the gateway — set PUBLIC_BASE_URL to a public host):",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+/** Final `src` values for the three images in the alert template. */
+type EmailAssetSrcs = { hero: string; logoDark: string; logoLight: string };
+
+const INLINE_EMAIL_ASSET_SRCS: EmailAssetSrcs = {
+  hero: "cid:budget-alert-hero",
+  logoDark: "cid:expense-tracker-logo-dark",
+  logoLight: "cid:expense-tracker-logo-light",
+};
 
 // --- small render helpers ---------------------------------------------------
 
@@ -188,9 +246,20 @@ function budgetAlertEmailHtml(input: {
   spentMinor: number;
   budgetMinor: number;
   categories: { label: string; amountMinor: number }[];
+  assets: EmailAssetSrcs;
 }): string {
   return screenshotInspiredBudgetAlertEmailHtml(input);
+}
 
+/** Superseded by the template above; kept for reference only. */
+function legacyBudgetAlertEmailHtml(input: {
+  month: string;
+  scope: string;
+  currency: string;
+  spentMinor: number;
+  budgetMinor: number;
+  categories: { label: string; amountMinor: number }[];
+}): string {
   const { month, scope, currency, spentMinor, budgetMinor } = input;
   const percent = Math.round((spentMinor / budgetMinor) * 100);
   const remaining = budgetMinor - spentMinor;
@@ -238,12 +307,12 @@ function screenshotInspiredBudgetAlertEmailHtml(input: {
   spentMinor: number;
   budgetMinor: number;
   categories: { label: string; amountMinor: number }[];
+  assets: EmailAssetSrcs;
 }): string {
   void enhancedBudgetAlertEmailHtml;
   void fullDashboardBudgetAlertEmailHtml;
+  void legacyBudgetAlertEmailHtml;
   const base = referenceBudgetAlertEmailHtml(input);
-  const root = process.env.PUBLIC_BASE_URL?.replace(/\/$/, "");
-  const heroUrl = process.env.BUDGET_ALERT_HERO_URL || (root ? `${root}/assets/email/budget-alert-robot-v2.png` : "");
   // Gradients and flexbox are not reliably rendered in email clients. A
   // bordered ring gives the budget gauge a stable, polished fallback.
   const inboxSafe = base
@@ -251,10 +320,13 @@ function screenshotInspiredBudgetAlertEmailHtml(input: {
     .replace("width:88px;height:88px;border-radius:50%;background:#fff;padding-top:25px;box-sizing:border-box;", "height:88px;border-radius:50%;background:#fff;padding-top:22px;box-sizing:border-box;")
     .replace("▰ &nbsp;Money Copilot AI", '<img src="__LOGO_DARK_SRC__" width="28" height="28" alt="Money Copilot AI" style="vertical-align:middle;border:0;border-radius:7px;">&nbsp; Money Copilot AI')
     .replace("🔷 &nbsp;<b>Money Copilot AI</b>", '<img src="__LOGO_LIGHT_SRC__" width="22" height="22" alt="Money Copilot AI" style="vertical-align:middle;border:0;border-radius:6px;">&nbsp; <b>Money Copilot AI</b>');
+  // Global replaces: the hero placeholder appears twice (a `background`
+  // attribute and a CSS `url(...)`), so the old single-occurrence string
+  // substitution left one of them pointing at the unreachable hosted URL.
   return inboxSafe
-    .replace(/__HERO_SRC__/g, heroUrl ? escapeXml(heroUrl) : "")
-    .replace(/__LOGO_DARK_SRC__/g, "__LOGO_DARK_SRC__")
-    .replace(/__LOGO_LIGHT_SRC__/g, "__LOGO_LIGHT_SRC__");
+    .replace(/__HERO_SRC__/g, escapeXml(input.assets.hero))
+    .replace(/__LOGO_DARK_SRC__/g, escapeXml(input.assets.logoDark))
+    .replace(/__LOGO_LIGHT_SRC__/g, escapeXml(input.assets.logoLight));
 }
 
 function categoryEmoji(label: string): string {
@@ -1407,43 +1479,19 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       const publicHeroUrl = process.env.BUDGET_ALERT_HERO_URL || (publicRoot ? `${publicRoot}/assets/email/budget-alert-robot-v2.png` : "");
       const publicDarkLogoUrl = publicRoot ? `${publicRoot}/assets/email/expense-tracker-logo-dark.png` : "";
       const publicLightLogoUrl = publicRoot ? `${publicRoot}/assets/email/expense-tracker-logo-light.png` : "";
-      type InlineEmailAsset = { content: string; filename: string; content_id: string; content_type: string };
-      let inlineHero: InlineEmailAsset | undefined;
-      let inlineLogos: InlineEmailAsset[] = [];
-      // Hosted artwork is the most compatible option across email clients.
-      // Inline CID embedding remains available as an explicit opt-in for
-      // providers that support Resend's attachment format.
-      if (process.env.EMAIL_INLINE_HERO === "true") {
-        try {
-          inlineHero = {
-            content: (await readFile(path.join(process.cwd(), "assets", "email", "budget-alert-robot-v2.png"))).toString("base64"),
-            filename: "expense-tracker-budget-robot.png",
-            content_id: "budget-alert-hero",
-            content_type: "image/png",
-          };
-          inlineLogos = await Promise.all([
-            ["expense-tracker-logo-dark.png", "expense-tracker-logo-dark", "expense-tracker-logo-dark.png"],
-            ["expense-tracker-logo-light.png", "expense-tracker-logo-light", "expense-tracker-logo-light.png"],
-          ].map(async ([file, content_id, filename]) => ({
-            content: (await readFile(path.join(process.cwd(), "assets", "email", file))).toString("base64"),
-            filename,
-            content_id,
-            content_type: "image/png",
-          })));
-        } catch {
-          // A hosted image is still used when optional artwork is unavailable.
-        }
-      }
-      let html = budgetAlertEmailHtml({ month, scope, currency: budget.currency, spentMinor: spent, budgetMinor: budget.amountMinor, categories: [...categoryMap.entries()].map(([label, amountMinor]) => ({ label, amountMinor })) });
-      if (inlineHero && publicHeroUrl) html = html.replace(publicHeroUrl, "cid:budget-alert-hero");
-      html = html
-        .replace(/__LOGO_DARK_SRC__/g, inlineHero ? "cid:expense-tracker-logo-dark" : publicDarkLogoUrl)
-        .replace(/__LOGO_LIGHT_SRC__/g, inlineHero ? "cid:expense-tracker-logo-light" : publicLightLogoUrl);
+      // CID embedding is the default: hosted /assets URLs sit behind the
+      // gateway's auth and 401 for the unauthenticated fetch every mail client
+      // makes. Set EMAIL_INLINE_HERO=false only if /assets is publicly served.
+      const inlineAssets = process.env.EMAIL_INLINE_HERO === "false" ? null : await loadInlineEmailAssets();
+      const assets: EmailAssetSrcs = inlineAssets
+        ? INLINE_EMAIL_ASSET_SRCS
+        : { hero: publicHeroUrl, logoDark: publicDarkLogoUrl, logoLight: publicLightLogoUrl };
+      const html = budgetAlertEmailHtml({ month, scope, currency: budget.currency, spentMinor: spent, budgetMinor: budget.amountMinor, categories: [...categoryMap.entries()].map(([label, amountMinor]) => ({ label, amountMinor })), assets });
       try {
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "User-Agent": "expense-tracker-mcp/1.0", "Idempotency-Key": providerKey },
-          body: JSON.stringify({ from, to: [state.notificationEmail], subject, text, html, attachments: inlineHero ? [inlineHero, ...inlineLogos] : undefined }),
+          body: JSON.stringify({ from, to: [state.notificationEmail], subject, text, html, attachments: inlineAssets ?? undefined }),
         });
         if (!response.ok) {
           const providerBody = await response.text();
