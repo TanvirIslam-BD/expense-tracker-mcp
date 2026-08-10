@@ -236,6 +236,30 @@
         "destructive_justification": "Can overwrite an existing recurring-expense configuration."
       }
     },
+    "list_recurring": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only reads the user's saved recurring-transaction settings and reports which occurrences are due.",
+        "open_world_justification": "Does not publish data or change any external system.",
+        "destructive_justification": "Does not delete, overwrite, or irreversibly change stored data."
+      }
+    },
+    "apply_recurring_expenses": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates private expense records for recurring entries that have come due and advances their next due date.",
+        "open_world_justification": "Can send a budget-limit alert email through the configured email provider when the recorded expenses cross a budget.",
+        "destructive_justification": "Advances each recurring entry's next due date, which is not retained, and can send an irreversible budget-alert email when a limit is crossed."
+      }
+    },
     "split_expense": {
       "annotations": {
         "readOnlyHint": false,

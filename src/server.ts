@@ -6,10 +6,14 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { createDashboardSessionToken } from "./dashboard-auth.js";
 import type { ExpenseStore } from "./store/types.js";
+import type { BudgetPeriod, DateWindow } from "./util.js";
 import {
+  advanceRecurringDate,
+  budgetWindowFor,
   currentMonth,
   daysInMonth,
   formatMoney,
+  priorBudgetWindows,
   isSafeMoneyAmount,
   isValidCurrency,
   isValidDate,
@@ -553,6 +557,10 @@ const TOOL_INPUTS = {
       .min(1)
       .optional()
       .describe("Category; omit for the overall budget"),
+    period: z
+      .enum(["weekly", "monthly", "yearly", "custom"])
+      .default("monthly")
+      .describe("Which budget period to delete; defaults to the monthly budget"),
   },
   delete_account: {
     confirm: z
@@ -584,6 +592,19 @@ const TOOL_INPUTS = {
     merchant: z.string().optional(), frequency: z.enum(["weekly", "monthly", "yearly"]),
     next_date: z.string(), currency: z.string().optional(), active: z.boolean().default(true),
   },
+  list_recurring: {
+    include_inactive: z.boolean().default(false).describe("Also list paused entries"),
+  },
+  apply_recurring_expenses: {
+    through: z
+      .string()
+      .optional()
+      .describe("Create occurrences due on or before this date (YYYY-MM-DD); defaults to today"),
+    dry_run: z
+      .boolean()
+      .default(false)
+      .describe("Preview what would be created without recording anything"),
+  },
   get_spending_forecast: { month: z.string().optional() },
   compare_months: { months: z.number().int().min(2).max(24).default(6), currency: z.string().optional() },
   get_budget_alerts: { month: z.string().optional() },
@@ -603,6 +624,33 @@ const TOOL_INPUTS = {
     offset: z.number().int().min(0).default(0),
   },
 };
+
+/** One budget (monthly table row or period rule) resolved against a date. */
+type BudgetStatusRow = {
+  id?: string;
+  scope: string;
+  category: string | null;
+  currency: string;
+  period: BudgetPeriod;
+  rollover: "reset" | "carry";
+  source: "monthly" | "rule";
+  window: DateWindow;
+  /** The configured limit, before any carried surplus/overspend. */
+  budgetMinor: number;
+  /** Surplus (or overspend, when negative) rolled in from earlier windows. */
+  carriedMinor: number;
+  /** budgetMinor + carriedMinor — the limit that actually applies now. */
+  effectiveMinor: number;
+  spentMinor: number;
+  remainingMinor: number;
+  percentUsed: number;
+  overBudget: boolean;
+};
+
+/** Human label for a budget's period, e.g. `weekly (2026-08-13 to 2026-08-19)`. */
+function budgetPeriodLabel(row: BudgetStatusRow): string {
+  return `${row.period} (${row.window.from} to ${row.window.to})`;
+}
 
 /** Shape of the client-facing expense view (see util.ts `view()`). */
 const expenseViewShape = {
@@ -660,13 +708,17 @@ const TOOL_OUTPUTS = {
         scope: z.string(),
         amount: z.number(),
         currency: z.string(),
-        period: z.literal("monthly"),
+        period: z.enum(["weekly", "monthly", "yearly", "custom"]),
+        rollover: z.enum(["reset", "carry"]),
+        period_start: z.string(),
+        period_end: z.string(),
       }),
     ),
   },
   delete_budget: {
     deleted: z.boolean(),
     scope: z.string(),
+    period: z.enum(["weekly", "monthly", "yearly", "custom"]),
   },
   delete_account: {
     deleted: z.boolean(),
@@ -679,11 +731,18 @@ const TOOL_OUTPUTS = {
       z.object({
         scope: z.string(),
         currency: z.string(),
+        /** The limit in force for this window: base_budget + carried_over. */
         budget: z.number(),
         spent: z.number(),
         remaining: z.number(),
         percent_used: z.number(),
         over_budget: z.boolean(),
+        period: z.enum(["weekly", "monthly", "yearly", "custom"]),
+        period_start: z.string(),
+        period_end: z.string(),
+        rollover: z.enum(["reset", "carry"]),
+        base_budget: z.number(),
+        carried_over: z.number(),
       }),
     ),
   },
@@ -703,6 +762,9 @@ const TOOL_OUTPUTS = {
         remaining: z.number(),
         percent_used: z.number(),
         over_budget: z.boolean(),
+        period: z.enum(["weekly", "monthly", "yearly", "custom"]),
+        period_start: z.string(),
+        period_end: z.string(),
       }),
     ),
     charts: z.array(
@@ -1153,11 +1215,11 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     {
       title: "Set budget",
       description:
-        "Set a monthly budget. Omit category for an overall budget; provide a " +
-        "category for a per-category budget. Re-setting a matching budget " +
-        "overwrites its existing configuration. Note: weekly, yearly, and custom " +
-        "periods are recorded but are not yet reflected in budget status, alerts, " +
-        "or reports — use monthly for budgets you want tracked.",
+        "Set a weekly, monthly, yearly, or custom budget. Omit category for an " +
+        "overall budget; provide a category for a per-category budget. " +
+        "Re-setting a matching budget overwrites its existing configuration. " +
+        "With rollover 'carry', unspent budget (or overspend) from earlier " +
+        "periods is rolled into the current one; 'reset' starts each period fresh.",
       inputSchema: TOOL_INPUTS.set_budget,
       outputSchema: TOOL_OUTPUTS.set_budget,
       annotations: {
@@ -1222,20 +1284,27 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       },
     },
     async () => {
-      const budgets = await store.listBudgets(userId);
-      if (budgets.length === 0) {
+      // Includes weekly/yearly/custom period rules, which this tool used to
+      // omit entirely — set_budget would report success and list_budgets would
+      // then say "No budgets set."
+      const rows = await resolveBudgets(todayISO());
+      if (rows.length === 0) {
         return text("No budgets set. Use set_budget to create one.", { budgets: [] });
       }
-      const lines = budgets.map(
-        (b) =>
-          `• ${(b.category ?? "overall").padEnd(14)} ` +
-          `${formatMoney(b.amountMinor, b.currency)} / month`,
+      const lines = rows.map(
+        (r) =>
+          `• ${r.scope.padEnd(14)} ${formatMoney(r.budgetMinor, r.currency)} / ${r.period}` +
+          (r.rollover === "carry" ? " (carry)" : "") +
+          ` — current window ${r.window.from} to ${r.window.to}`,
       );
-      const structured = budgets.map((b) => ({
-        scope: b.category ?? "overall",
-        amount: toMajor(b.amountMinor),
-        currency: b.currency,
-        period: b.period,
+      const structured = rows.map((r) => ({
+        scope: r.scope,
+        amount: toMajor(r.budgetMinor),
+        currency: r.currency,
+        period: r.period,
+        rollover: r.rollover,
+        period_start: r.window.from,
+        period_end: r.window.to,
       }));
       return text(lines.join("\n") + "\n\n" + jsonBlock(structured), { budgets: structured });
     },
@@ -1258,17 +1327,25 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ category }) => {
+    async ({ category, period }) => {
       const target = category ? category.trim().toLowerCase() : null;
-      const budgets = await store.listBudgets(userId);
-      const found = budgets.find((b) => b.category === target);
       const label = target ? `"${target}"` : "overall";
-      if (!found) return fail(`No ${label} budget to delete.`);
-      await store.deleteBudget(userId, found.id);
-      return text(`Deleted ${label} monthly budget.`, {
-        deleted: true,
-        scope: target ?? "overall",
-      });
+      if (period === "monthly") {
+        const found = (await store.listBudgets(userId)).find((b) => b.category === target);
+        if (found) {
+          await store.deleteBudget(userId, found.id);
+          return text(`Deleted ${label} monthly budget.`, { deleted: true, scope: target ?? "overall", period });
+        }
+      }
+      // Period rules live in finance state, so they need their own lookup —
+      // previously there was no way to delete a weekly/yearly/custom budget.
+      const state = await store.getFinanceState(userId);
+      const rules = state.budgetRules ?? [];
+      const remaining = rules.filter((rule) => !(rule.category === target && rule.period === period));
+      if (remaining.length === rules.length) return fail(`No ${period} ${label} budget to delete.`);
+      state.budgetRules = remaining;
+      await store.setFinanceState(userId, state);
+      return text(`Deleted ${label} ${period} budget.`, { deleted: true, scope: target ?? "overall", period });
     },
   );
 
@@ -1326,51 +1403,47 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
       const m = month ?? currentMonth();
       if (!isValidMonth(m)) return fail(`Invalid month "${m}". Use YYYY-MM.`);
 
-      const budgets = await store.listBudgets(userId);
-      if (budgets.length === 0) {
+      // Weekly and custom budgets need a specific day, not just a month, to
+      // pick their window. Use today inside the current month so "this week"
+      // means the live one; otherwise the month's last day.
+      const onDate = m === currentMonth()
+        ? todayISO()
+        : `${m}-${String(daysInMonth(m)).padStart(2, "0")}`;
+      const rows = await resolveBudgets(onDate);
+      if (rows.length === 0) {
         return text("No budgets set. Use set_budget to create one.", {
           month: m,
           statuses: [],
         });
       }
 
-      // Scope to the month at the store level (uses the (user_id, date) index)
-      // rather than fetching every expense and filtering in memory. All valid
-      // days in month `m` sort within [`${m}-01`, `${m}-31`] lexicographically.
-      const monthExpenses = await store.listExpenses(userId, {
-        from: `${m}-01`,
-        to: `${m}-31`,
-      });
+      const statuses = rows.map((s) => ({
+        scope: s.scope,
+        currency: s.currency,
+        budget: toMajor(s.effectiveMinor),
+        spent: toMajor(s.spentMinor),
+        remaining: toMajor(s.remainingMinor),
+        percent_used: s.percentUsed,
+        over_budget: s.overBudget,
+        period: s.period,
+        period_start: s.window.from,
+        period_end: s.window.to,
+        rollover: s.rollover,
+        base_budget: toMajor(s.budgetMinor),
+        carried_over: toMajor(s.carriedMinor),
+        _row: s,
+      }));
 
-      const statuses = budgets.map((b) => {
-        const relevant = monthExpenses.filter(
-          (e) =>
-            e.currency === b.currency &&
-            (b.category === null || e.category === b.category),
-        );
-        const spentMinor = relevant.reduce((a, e) => a + e.amountMinor, 0);
-        const remainingMinor = b.amountMinor - spentMinor;
-        const pct = b.amountMinor > 0 ? (spentMinor / b.amountMinor) * 100 : 0;
-        return {
-          scope: b.category ?? "overall",
-          currency: b.currency,
-          budget: toMajor(b.amountMinor),
-          spent: toMajor(spentMinor),
-          remaining: toMajor(remainingMinor),
-          percent_used: Math.round(pct * 10) / 10,
-          over_budget: spentMinor > b.amountMinor,
-          _budgetMinor: b.amountMinor,
-          _spentMinor: spentMinor,
-          _remainingMinor: remainingMinor,
-        };
-      });
-
-      const lines = statuses.map((s) => {
-        const flag = s.over_budget ? "  ⚠ OVER" : "";
+      const lines = statuses.map(({ _row: s }) => {
+        const flag = s.overBudget ? "  ⚠ OVER" : "";
+        const carried = s.carriedMinor !== 0
+          ? ` [${s.carriedMinor > 0 ? "+" : ""}${formatMoney(s.carriedMinor, s.currency)} carried]`
+          : "";
         return (
-          `• ${s.scope.padEnd(14)} ${formatMoney(s._spentMinor, s.currency)} / ` +
-          `${formatMoney(s._budgetMinor, s.currency)}  ` +
-          `(${s.percent_used}% used, ${formatMoney(s._remainingMinor, s.currency)} left)${flag}`
+          `• ${s.scope.padEnd(14)} ${formatMoney(s.spentMinor, s.currency)} / ` +
+          `${formatMoney(s.effectiveMinor, s.currency)}  ` +
+          `(${s.percentUsed}% used, ${formatMoney(s.remainingMinor, s.currency)} left)` +
+          ` — ${budgetPeriodLabel(s)}${carried}${flag}`
         );
       });
 
@@ -1382,6 +1455,12 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         remaining: s.remaining,
         percent_used: s.percent_used,
         over_budget: s.over_budget,
+        period: s.period,
+        period_start: s.period_start,
+        period_end: s.period_end,
+        rollover: s.rollover,
+        base_budget: s.base_budget,
+        carried_over: s.carried_over,
       }));
 
       return text(
@@ -1449,6 +1528,80 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     const state = await store.getFinanceState(userId);
     if (!state.emailAlertsEnabled || !state.notificationEmail) return;
     for (const month of unique) await notifyBudgetLimitCrossed(month);
+  }
+
+  /**
+   * Every budget that applies on `onDate`, from both storage locations: the
+   * indexed monthly `budgets` table and the period rules kept in finance state.
+   * Rules used to be write-only — set_budget stored weekly/yearly/custom
+   * budgets that no read path ever queried, so they silently did nothing.
+   *
+   * Spending is fetched in a single query spanning every window in play
+   * (including the earlier windows a "carry" rollover needs) rather than one
+   * query per budget.
+   */
+  async function resolveBudgets(onDate: string): Promise<BudgetStatusRow[]> {
+    const [monthlyBudgets, state] = await Promise.all([
+      store.listBudgets(userId),
+      store.getFinanceState(userId),
+    ]);
+
+    type Pending = {
+      scope: string; category: string | null; currency: string;
+      period: BudgetPeriod; rollover: "reset" | "carry";
+      amountMinor: number; window: DateWindow; prior: DateWindow[]; id?: string;
+      source: "monthly" | "rule";
+    };
+    const pending: Pending[] = [];
+
+    for (const budget of monthlyBudgets) {
+      const window = budgetWindowFor({ period: "monthly" }, onDate);
+      if (!window) continue;
+      pending.push({
+        scope: budget.category ?? "overall", category: budget.category, currency: budget.currency,
+        period: "monthly", rollover: "reset", amountMinor: budget.amountMinor,
+        window, prior: [], id: budget.id, source: "monthly",
+      });
+    }
+
+    for (const rule of state.budgetRules ?? []) {
+      const window = budgetWindowFor(rule, onDate);
+      if (!window) continue; // rule not active on this date
+      pending.push({
+        scope: rule.category ?? "overall", category: rule.category, currency: rule.currency,
+        period: rule.period, rollover: rule.rollover, amountMinor: rule.amountMinor,
+        window, prior: rule.rollover === "carry" ? priorBudgetWindows(rule, onDate) : [],
+        id: rule.id, source: "rule",
+      });
+    }
+    if (pending.length === 0) return [];
+
+    const allWindows = pending.flatMap((p) => [p.window, ...p.prior]);
+    const expenses = await store.listExpenses(userId, {
+      from: allWindows.reduce((min, w) => (w.from < min ? w.from : min), allWindows[0].from),
+      to: allWindows.reduce((max, w) => (w.to > max ? w.to : max), allWindows[0].to),
+    });
+    const spentIn = (p: Pending, window: DateWindow) =>
+      expenses
+        .filter((e) => e.currency === p.currency && (p.category === null || e.category === p.category))
+        .filter((e) => e.date >= window.from && e.date <= window.to)
+        .reduce((sum, e) => sum + e.amountMinor, 0);
+
+    return pending.map((p) => {
+      // Carry rolls each earlier window's surplus (or overspend) forward, so
+      // the limit you actually have this window is amount +/- what came before.
+      const carriedMinor = p.prior.reduce((sum, w) => sum + (p.amountMinor - spentIn(p, w)), 0);
+      const effectiveMinor = p.amountMinor + carriedMinor;
+      const spentMinor = spentIn(p, p.window);
+      return {
+        id: p.id, scope: p.scope, category: p.category, currency: p.currency,
+        period: p.period, rollover: p.rollover, source: p.source,
+        window: p.window, budgetMinor: p.amountMinor, carriedMinor, effectiveMinor,
+        spentMinor, remainingMinor: effectiveMinor - spentMinor,
+        percentUsed: effectiveMinor > 0 ? Math.round((spentMinor / effectiveMinor) * 1000) / 10 : 0,
+        overBudget: spentMinor > effectiveMinor,
+      };
+    });
   }
 
   /** Send each budget-limit alert at most once per month/scope/currency. */
@@ -1531,7 +1684,6 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
 
       const expenses = await store.listExpenses(userId, monthRange(m));
       const previousExpenses = await store.listExpenses(userId, monthRange(previousMonth(m, 1)));
-      const budgets = await store.listBudgets(userId);
       const totals = totalsByCurrency(expenses);
       const elapsedDays = m === currentMonth() ? Math.max(1, Number(todayISO().slice(8, 10))) : daysInMonth(m);
       const forecast = Object.fromEntries(Object.entries(totals).map(([currency, minor]) => [currency, toMajor(Math.round((minor / elapsedDays) * daysInMonth(m)))]));
@@ -1548,27 +1700,25 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
         .map(([category, value]) => ({ category, ...value }))
         .sort((a, b) => b.count - a.count);
 
-      const budgetRows = budgets.map((budget) => {
-        const spentMinor = expenses
-          .filter(
-            (expense) =>
-              expense.currency === budget.currency &&
-              (budget.category === null || expense.category === budget.category),
-          )
-          .reduce((sum, expense) => sum + expense.amountMinor, 0);
-        const remainingMinor = budget.amountMinor - spentMinor;
-        return {
-          scope: budget.category ?? "overall",
-          currency: budget.currency,
-          budget: toMajor(budget.amountMinor),
-          spent: toMajor(spentMinor),
-          remaining: toMajor(remainingMinor),
-          percent_used: Math.round((spentMinor / budget.amountMinor) * 1000) / 10,
-          over_budget: spentMinor > budget.amountMinor,
-          budgetMinor: budget.amountMinor,
-          spentMinor,
-        };
-      });
+      // Resolved against the report month so weekly/yearly/custom budgets show
+      // up here too, each measured over its own window rather than the month.
+      const onDate = m === currentMonth()
+        ? todayISO()
+        : `${m}-${String(daysInMonth(m)).padStart(2, "0")}`;
+      const budgetRows = (await resolveBudgets(onDate)).map((row) => ({
+        scope: row.scope,
+        currency: row.currency,
+        budget: toMajor(row.effectiveMinor),
+        spent: toMajor(row.spentMinor),
+        remaining: toMajor(row.remainingMinor),
+        percent_used: row.percentUsed,
+        over_budget: row.overBudget,
+        period: row.period,
+        period_start: row.window.from,
+        period_end: row.window.to,
+        budgetMinor: row.effectiveMinor,
+        spentMinor: row.spentMinor,
+      }));
 
       const charts: { type: "pie" | "budget_bar"; currency: string; title: string; series: { label: string; value: number }[] }[] = [];
       const images: { type: "image"; data: string; mimeType: "image/svg+xml" }[] = [];
@@ -1736,6 +1886,112 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     const structured = { month: m, currencies: result }; return text(`Cash flow for ${m}.\n\n${jsonBlock(structured)}`, structured);
   });
 
+  /** Occurrences a recurring entry owes between its nextDate and `through`. */
+  function dueOccurrences(entry: { nextDate: string; frequency: "weekly" | "monthly" | "yearly" }, through: string): string[] {
+    const dates: string[] = [];
+    let cursor = entry.nextDate;
+    // Bounded so a long-dormant entry can't spin or flood the store; the
+    // remainder is reported and picked up by the next call.
+    while (cursor <= through && dates.length < 120) {
+      dates.push(cursor);
+      cursor = advanceRecurringDate(cursor, entry.frequency);
+    }
+    return dates;
+  }
+
+  server.registerTool("list_recurring", {
+    title: "List recurring transactions",
+    description:
+      "List saved recurring expenses (rent, subscriptions, utilities, loans) with their " +
+      "schedule, next due date, and how many occurrences are currently due. Use " +
+      "apply_recurring_expenses to actually record the due ones. Pause an entry with " +
+      "set_recurring_expense active:false.",
+    inputSchema: TOOL_INPUTS.list_recurring,
+    annotations: { title: "List recurring transactions", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ include_inactive }) => {
+    const state = await store.getFinanceState(userId);
+    const today = todayISO();
+    const entries = (state.recurring ?? []).filter((entry) => include_inactive || entry.active);
+    if (entries.length === 0) {
+      return text(
+        include_inactive
+          ? "No recurring transactions saved. Use set_recurring_expense to add one."
+          : "No active recurring transactions. Use set_recurring_expense to add one, or pass include_inactive to see paused entries.",
+        { recurring: [] },
+      );
+    }
+    const rows = entries.map((entry) => {
+      const due = entry.active ? dueOccurrences(entry, today) : [];
+      return {
+        id: entry.id, kind: entry.kind, amount: toMajor(entry.amountMinor), currency: entry.currency,
+        category: entry.category, description: entry.description, merchant: entry.merchant,
+        frequency: entry.frequency, next_date: entry.nextDate, active: entry.active,
+        due_count: due.length, due_total: toMajor(due.length * entry.amountMinor),
+      };
+    });
+    const lines = rows.map((r) =>
+      `• ${r.category.padEnd(14)} ${formatMoney(toMinor(r.amount), r.currency)} ${r.frequency}` +
+      ` — next ${r.next_date}${r.active ? "" : " (paused)"}` +
+      (r.due_count ? `  ⚠ ${r.due_count} due` : ""));
+    const totalDue = rows.reduce((sum, r) => sum + r.due_count, 0);
+    return text(
+      `${rows.length} recurring transaction(s)` +
+        (totalDue ? `, ${totalDue} occurrence(s) due — run apply_recurring_expenses to record them` : "") +
+        `:\n${lines.join("\n")}\n\n${jsonBlock(rows)}`,
+      { recurring: rows },
+    );
+  });
+
+  server.registerTool("apply_recurring_expenses", {
+    title: "Record due recurring expenses",
+    description:
+      "Create real expense records for every active recurring expense that has come due, " +
+      "catching up any missed occurrences, and advance each entry's next due date. Use " +
+      "dry_run to preview first. If budget-limit email alerts are enabled and the new " +
+      "expenses cross a budget, the server also sends an alert email.",
+    inputSchema: TOOL_INPUTS.apply_recurring_expenses,
+    annotations: { title: "Record due recurring expenses", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, async ({ through, dry_run }) => {
+    const cutoff = through ?? todayISO();
+    if (!isValidDate(cutoff)) return fail(`Invalid date "${cutoff}". Use YYYY-MM-DD.`);
+    const state = await store.getFinanceState(userId);
+    const planned: { entry: (typeof state.recurring)[number]; dates: string[] }[] = [];
+    for (const entry of state.recurring ?? []) {
+      if (!entry.active || entry.kind !== "expense") continue;
+      const dates = dueOccurrences(entry, cutoff);
+      if (dates.length) planned.push({ entry, dates });
+    }
+    if (planned.length === 0) {
+      return text(`Nothing due on or before ${cutoff}.`, { created: 0, expenses: [], through: cutoff, dry_run });
+    }
+
+    const toCreate = planned.flatMap(({ entry, dates }) => dates.map((date) => ({
+      userId, amountMinor: entry.amountMinor, currency: entry.currency,
+      category: entry.category, description: entry.description || entry.merchant || "Recurring expense", date,
+    })));
+    if (dry_run) {
+      return text(
+        `Would record ${toCreate.length} expense(s) through ${cutoff} (dry run — nothing was saved).\n\n` +
+          jsonBlock(toCreate.map((e) => ({ date: e.date, category: e.category, amount: toMajor(e.amountMinor), currency: e.currency }))),
+        { created: 0, would_create: toCreate.length, through: cutoff, dry_run: true },
+      );
+    }
+
+    const created = await store.addExpenses(toCreate);
+    // Advance each entry past what we just recorded, then persist once.
+    for (const { entry, dates } of planned) {
+      entry.nextDate = advanceRecurringDate(dates[dates.length - 1], entry.frequency);
+    }
+    await store.setFinanceState(userId, state);
+    await notifyBudgetLimitCrossedForMonths(created.map((expense) => expense.date.slice(0, 7)));
+    const totals = totalsByCurrency(created);
+    return text(
+      `Recorded ${created.length} recurring expense(s) through ${cutoff}, total ${renderTotals(totals)}.\n\n` +
+        jsonBlock(created.map(view)),
+      { created: created.length, through: cutoff, dry_run: false, expenses: created.map(view) },
+    );
+  });
+
   server.registerTool("get_spending_forecast", { title: "Get spending forecast", description: "Forecast month-end spending and remaining daily budget from spending so far.", inputSchema: TOOL_INPUTS.get_spending_forecast, annotations: { title: "Get spending forecast", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
     const m = month ?? currentMonth(); if (!isValidMonth(m)) return fail(`Invalid month "${m}".`); const range = monthRange(m); const [expenses, budgets] = await Promise.all([store.listExpenses(userId, range), store.listBudgets(userId)]); const elapsed = m === currentMonth() ? Math.max(1, Number(todayISO().slice(8, 10))) : daysInMonth(m); const result = Object.entries(totalsByCurrency(expenses)).map(([currency, spent]) => { const forecast = Math.round((spent / elapsed) * daysInMonth(m)); const overall = budgets.find((b) => b.category === null && b.currency === currency); return { currency, spent: toMajor(spent), forecast: toMajor(forecast), remaining_daily_budget: overall ? toMajor((overall.amountMinor - spent) / Math.max(1, daysInMonth(m) - elapsed)) : null }; }); const structured = { month: m, forecasts: result }; return text(`Spending forecast for ${m}.\n\n${jsonBlock(structured)}`, structured);
   });
@@ -1747,7 +2003,14 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
   });
 
   server.registerTool("get_budget_alerts", { title: "Get budget alerts", description: "List configured threshold alerts and over-budget categories.", inputSchema: TOOL_INPUTS.get_budget_alerts, annotations: { title: "Get budget alerts", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ month }) => {
-    const m = month ?? currentMonth(); if (!isValidMonth(m)) return fail(`Invalid month "${m}".`); const [expenses, budgets, state] = await Promise.all([store.listExpenses(userId, monthRange(m)), store.listBudgets(userId), store.getFinanceState(userId)]); const alerts = budgets.flatMap((budget) => { const spent = expenses.filter((e) => e.currency === budget.currency && (budget.category === null || e.category === budget.category)).reduce((sum, e) => sum + e.amountMinor, 0); const percent = (spent / budget.amountMinor) * 100; return state.alertThresholds.filter((threshold) => percent >= threshold).map((threshold) => ({ scope: budget.category ?? "overall", currency: budget.currency, threshold, percent_used: Math.round(percent * 10) / 10, over_budget: spent > budget.amountMinor })); }); const structured = { month: m, alerts }; return text(alerts.length ? `Budget alerts for ${m}.\n\n${jsonBlock(structured)}` : `No budget alerts for ${m}.`, structured);
+    const m = month ?? currentMonth(); if (!isValidMonth(m)) return fail(`Invalid month "${m}".`);
+    const onDate = m === currentMonth() ? todayISO() : `${m}-${String(daysInMonth(m)).padStart(2, "0")}`;
+    // Covers period rules too, not just the monthly table.
+    const [rows, state] = await Promise.all([resolveBudgets(onDate), store.getFinanceState(userId)]);
+    const alerts = rows.flatMap((row) => state.alertThresholds
+      .filter((threshold) => row.percentUsed >= threshold)
+      .map((threshold) => ({ scope: row.scope, currency: row.currency, threshold, percent_used: row.percentUsed, over_budget: row.overBudget, period: row.period, period_start: row.window.from, period_end: row.window.to })));
+    const structured = { month: m, alerts }; return text(alerts.length ? `Budget alerts for ${m}.\n\n${jsonBlock(structured)}` : `No budget alerts for ${m}.`, structured);
   });
 
   server.registerTool("find_duplicate_expenses", { title: "Find duplicate expenses", description: "Find likely duplicate expenses with the same date, category, amount, currency, and description.", inputSchema: TOOL_INPUTS.find_duplicate_expenses, annotations: { title: "Find duplicate expenses", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ from, to }) => {

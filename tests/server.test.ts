@@ -24,6 +24,8 @@ const TOOL_NAMES = [
   "export_expenses",
   "add_income",
   "set_recurring_expense",
+  "list_recurring",
+  "apply_recurring_expenses",
   "split_expense",
   "import_expenses",
   "manage_categories",
@@ -589,6 +591,134 @@ describe("MCP server (in-memory transport)", () => {
       if (originalKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalKey;
       if (originalFrom === undefined) delete process.env.BUDGET_ALERT_EMAIL_FROM; else process.env.BUDGET_ALERT_EMAIL_FROM = originalFrom;
     }
+  });
+
+  // --- regressions: non-monthly budgets used to be write-only ------------
+  // set_budget accepted weekly/yearly/custom periods and reported success,
+  // but no read path queried them, so they silently did nothing.
+
+  it("surfaces non-monthly budgets in list_budgets and get_budget_status", async () => {
+    expect(textOf(await call(client, "set_budget", { amount: 24000, period: "yearly" }))).toContain("yearly");
+
+    const listed = (await call(client, "list_budgets")).structuredContent as any;
+    expect(listed.budgets).toHaveLength(1);
+    expect(listed.budgets[0]).toMatchObject({ scope: "overall", period: "yearly", amount: 24000 });
+
+    const status = (await call(client, "get_budget_status")).structuredContent as any;
+    expect(status.statuses).toHaveLength(1);
+    expect(status.statuses[0]).toMatchObject({ scope: "overall", period: "yearly" });
+    // The window must be the calendar year, not a month.
+    expect(status.statuses[0].period_start).toMatch(/^\d{4}-01-01$/);
+    expect(status.statuses[0].period_end).toMatch(/^\d{4}-12-31$/);
+  });
+
+  it("tracks weekly, monthly, and yearly budgets against their own windows", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    await call(client, "set_budget", { amount: 100, category: "food", period: "weekly" });
+    await call(client, "set_budget", { amount: 400, category: "food" }); // monthly
+    await call(client, "add_expense", { amount: 60, category: "food", date: today });
+
+    const statuses = ((await call(client, "get_budget_status")).structuredContent as any).statuses;
+    const weekly = statuses.find((s: any) => s.period === "weekly");
+    const monthly = statuses.find((s: any) => s.period === "monthly");
+
+    expect(weekly.spent).toBe(60);
+    expect(weekly.percent_used).toBe(60);
+    expect(monthly.spent).toBe(60);
+    expect(monthly.percent_used).toBe(15);
+    // A weekly window is 7 days; a monthly one is not.
+    const days = (s: any) =>
+      (Date.parse(s.period_end) - Date.parse(s.period_start)) / 86400000 + 1;
+    expect(days(weekly)).toBe(7);
+    expect(days(monthly)).toBeGreaterThan(27);
+  });
+
+  it("rolls unspent budget forward when rollover is 'carry'", async () => {
+    const now = new Date();
+    // Anchor three months back with nothing spent, so two full windows carry.
+    const anchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1))
+      .toISOString().slice(0, 10);
+    await call(client, "set_budget", { amount: 100, period: "monthly", rollover: "carry", start_date: anchor });
+
+    const row = ((await call(client, "get_budget_status")).structuredContent as any).statuses[0];
+    expect(row.base_budget).toBe(100);
+    expect(row.carried_over).toBe(200);
+    expect(row.budget).toBe(300); // effective limit = base + carried
+    expect(row.rollover).toBe("carry");
+  });
+
+  it("raises threshold alerts for non-monthly budgets", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    await call(client, "set_alert_thresholds", { thresholds: [50] });
+    await call(client, "set_budget", { amount: 100, category: "food", period: "weekly" });
+    await call(client, "add_expense", { amount: 60, category: "food", date: today });
+
+    const alerts = ((await call(client, "get_budget_alerts")).structuredContent as any).alerts;
+    expect(alerts).toContainEqual(expect.objectContaining({ scope: "food", period: "weekly", threshold: 50 }));
+  });
+
+  it("deletes a non-monthly budget without touching the monthly one", async () => {
+    await call(client, "set_budget", { amount: 100, category: "food", period: "weekly" });
+    await call(client, "set_budget", { amount: 400, category: "food" }); // monthly
+
+    expect(textOf(await call(client, "delete_budget", { category: "food", period: "weekly" }))).toContain("weekly");
+    const left = ((await call(client, "list_budgets")).structuredContent as any).budgets;
+    expect(left.map((b: any) => b.period)).toEqual(["monthly"]);
+
+    // Deleting one that isn't there is still an error, not a silent success.
+    expect(await isToolError(client, "delete_budget", { category: "food", period: "weekly" })).toBe(true);
+  });
+
+  // --- regressions: recurring transactions used to be write-only ---------
+
+  it("lists saved recurring transactions and flags what is due", async () => {
+    await call(client, "set_recurring_expense", {
+      amount: 1200, category: "rent", frequency: "monthly", next_date: "2026-01-01", description: "Rent",
+    });
+    const listed = (await call(client, "list_recurring")).structuredContent as any;
+    expect(listed.recurring).toHaveLength(1);
+    expect(listed.recurring[0]).toMatchObject({ category: "rent", frequency: "monthly", amount: 1200, active: true });
+    expect(listed.recurring[0].due_count).toBeGreaterThan(0);
+  });
+
+  it("hides paused entries unless asked for them", async () => {
+    await call(client, "set_recurring_expense", {
+      amount: 10, category: "entertainment", frequency: "monthly", next_date: "2026-01-01", active: false,
+    });
+    expect(((await call(client, "list_recurring")).structuredContent as any).recurring).toHaveLength(0);
+    const all = (await call(client, "list_recurring", { include_inactive: true })).structuredContent as any;
+    expect(all.recurring).toHaveLength(1);
+    expect(all.recurring[0]).toMatchObject({ active: false, due_count: 0 });
+  });
+
+  it("records due recurring expenses, catching up missed occurrences", async () => {
+    await call(client, "set_recurring_expense", {
+      amount: 50, category: "utilities", frequency: "monthly", next_date: "2026-01-15", description: "Internet",
+    });
+
+    const preview = (await call(client, "apply_recurring_expenses", { through: "2026-04-20", dry_run: true })).structuredContent as any;
+    expect(preview.would_create).toBe(4); // Jan 15, Feb 15, Mar 15, Apr 15
+    expect(preview.created).toBe(0);
+    // A dry run must not write anything.
+    expect(textOf(await call(client, "list_expenses", {}))).toContain("No expenses found");
+
+    const applied = (await call(client, "apply_recurring_expenses", { through: "2026-04-20" })).structuredContent as any;
+    expect(applied.created).toBe(4);
+    // Returned in the order they were recorded: oldest occurrence first.
+    expect(applied.expenses.map((e: any) => e.date)).toEqual(["2026-01-15", "2026-02-15", "2026-03-15", "2026-04-15"]);
+
+    // next_date advanced past what was recorded, so re-running is a no-op.
+    const after = (await call(client, "list_recurring")).structuredContent as any;
+    expect(after.recurring[0].next_date).toBe("2026-05-15");
+    expect(((await call(client, "apply_recurring_expenses", { through: "2026-04-20" })).structuredContent as any).created).toBe(0);
+  });
+
+  it("skips paused recurring entries when applying", async () => {
+    await call(client, "set_recurring_expense", {
+      amount: 99, category: "shopping", frequency: "monthly", next_date: "2026-01-01", active: false,
+    });
+    const applied = (await call(client, "apply_recurring_expenses", { through: "2026-06-01" })).structuredContent as any;
+    expect(applied.created).toBe(0);
   });
 
   it("embeds alert-email artwork as CID attachments, not gated hosted URLs", async () => {
