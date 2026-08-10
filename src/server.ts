@@ -817,6 +817,63 @@ export function buildServer(store: ExpenseStore, userId: string): McpServer {
     },
   );
 
+  /*
+   * Ask MCP-only users for a name and an email, since there is no screen here to
+   * ask on.
+   *
+   * The dashboard gates on this before it will load, but someone who connects
+   * from ChatGPT or Claude and never opens it cannot be shown a form -- and
+   * without an address there is no way to answer their support request, send a
+   * budget alert or deliver an email report. MCPize supplies neither: its access
+   * token carries no identity claims and its profiles table has no row at all for
+   * some accounts.
+   *
+   * A nudge rather than a refusal. Failing add_expense until someone visits a
+   * website would turn a working integration into a broken one inside their chat,
+   * which is a worse outcome than asking repeatedly. It appends one line and
+   * stops the moment they answer.
+   *
+   * Appended to text only, never to structuredContent: that is the machine-
+   * readable half and callers parse it against the tool's output schema.
+   */
+  const PROFILE_NUDGE =
+    "Money Copilot has no name or email address on file for you, so it cannot send " +
+    "budget alerts, email reports, or reply if you contact support. Add them at " +
+    "https://www.copilotai.live/dashboard — it takes a moment.";
+
+  // Checked once per server rather than once per tool call: buildServer is
+  // constructed per request, so this is already as fresh as the request is, and a
+  // tool that calls several helpers should not pay for several lookups.
+  let contactDetailsKnown: Promise<boolean> | null = null;
+
+  async function withProfileNudge(result: ToolResult): Promise<ToolResult> {
+    // Never on an error result: the useful message there is the failure itself.
+    if (result.isError) return result;
+    contactDetailsKnown ??= store.hasContactDetails(userId).catch(() => true);
+    if (await contactDetailsKnown) return result;
+    const firstText = result.content.findIndex((part) => part.type === "text");
+    if (firstText === -1) return { ...result, content: [...result.content, { type: "text", text: PROFILE_NUDGE }] };
+    const content = result.content.map((part, index) => (
+      index === firstText && part.type === "text"
+        ? { ...part, text: `${part.text}\n\n${PROFILE_NUDGE}` }
+        : part
+    ));
+    return { ...result, content };
+  }
+
+  /*
+   * Wrapped once here instead of at every registerTool call site. There are around
+   * forty of them; threading the nudge through each by hand would be forty chances
+   * to miss one, and a nudge that appears on only some tools reads as a bug.
+   */
+  const registerToolDirectly = server.registerTool.bind(server);
+  server.registerTool = ((name: string, config: unknown, handler: (...args: never[]) => unknown) =>
+    registerToolDirectly(
+      name as never,
+      config as never,
+      (async (...args: never[]) => withProfileNudge(await handler(...args) as ToolResult)) as never,
+    )) as typeof server.registerTool;
+
   // -------------------------------------------------------------------------
   // Tools
   // -------------------------------------------------------------------------

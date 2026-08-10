@@ -158,6 +158,14 @@ export interface ExpenseStore {
 
   getUserAccessStatus(userId: string): Promise<"active" | "suspended">;
   recordActivity(userId: string, source: string, eventType: string, detail?: Record<string, unknown>): Promise<void>;
+  /**
+   * Whether the dashboard holds a name and a contact address for this user.
+   *
+   * Used only to decide whether to append the profile nudge to a tool result.
+   * Returns `true` when it cannot tell -- an unreachable database must not put a
+   * nag on every response.
+   */
+  hasContactDetails(userId: string): Promise<boolean>;
 
   addExpense(expense: NewExpense): Promise<Expense>;
   /** Insert several expenses at once (one round trip where the backend supports it). */

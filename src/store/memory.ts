@@ -62,6 +62,11 @@ export class MemoryStore implements ExpenseStore {
 
   async recordActivity(_userId: string, _source: string, _eventType: string, _detail: Record<string, unknown> = {}): Promise<void> {}
 
+  // The memory store has no account tables, so it has nothing to nag about.
+  async hasContactDetails(_userId: string): Promise<boolean> {
+    return true;
+  }
+
   /** Serialise writes so concurrent mutations can't corrupt the JSON file. */
   private persist(): void {
     if (!this.file) return;
