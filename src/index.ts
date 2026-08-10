@@ -266,6 +266,30 @@ async function startHttp(): Promise<void> {
   // so customer emails can reference this stable HTTPS location.
   app.use("/assets", express.static("assets", { maxAge: "7d", immutable: true }));
 
+  // Opt-in access log covering EVERY request, including ones that never reach
+  // a route (404s) or that a route rejects before the /mcp handler's own
+  // logging (405/406). Without this, a request that fails early is invisible:
+  // it shows up in the platform log as a bare 4xx with no indication of what
+  // was asked for. Path only, never the query string — /dashboard carries a
+  // signed dashboard_token there.
+  if (process.env.LOG_REQUESTS) {
+    app.use((req, res, next) => {
+      const started = Date.now();
+      // "finish" covers normal responses; "close" catches ones the client
+      // aborted (a long-lived SSE stream, say), which would otherwise never
+      // be logged at all. Whichever fires first wins, logged once.
+      let logged = false;
+      const log = () => {
+        if (logged) return;
+        logged = true;
+        console.error(`[http] ${req.method} ${req.path} -> ${res.statusCode} ${Date.now() - started}ms`);
+      };
+      res.once("finish", log);
+      res.once("close", log);
+      next();
+    });
+  }
+
   // Permissive CORS so browser-based and proxied MCP clients can connect.
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", req.header("origin") || "*");
@@ -567,7 +591,43 @@ async function startHttp(): Promise<void> {
     }
   });
 
-  const methodNotAllowed = (_req: Request, res: Response) => {
+  /**
+   * Streamable HTTP lets a client open a long-lived GET stream for
+   * server-to-client messages. The spec permits answering 405 when a server
+   * doesn't offer one, and this server is stateless so it never pushes
+   * anything — but some clients (OpenAI's tool scanner among them) treat the
+   * 405 as a failed connection and abort the whole session. Cloud Run logs
+   * showed three such 4xx retries on every scan, immediately after
+   * notifications/initialized.
+   *
+   * So: accept the stream and hold it open, emitting only SSE keep-alive
+   * comments. Bounded well under Cloud Run's 300s request timeout so a
+   * forgotten stream cannot pin a container slot indefinitely; clients treat
+   * a closed stream as a normal reconnect.
+   */
+  const SSE_KEEPALIVE_MS = 15_000;
+  const SSE_MAX_LIFETIME_MS = 240_000;
+  app.get("/mcp", (_req: Request, res: Response) => {
+    res.status(200).set({
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.flushHeaders();
+    res.write(": connected\n\n");
+    const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), SSE_KEEPALIVE_MS);
+    const lifetime = setTimeout(() => res.end(), SSE_MAX_LIFETIME_MS);
+    res.once("close", () => {
+      clearInterval(keepAlive);
+      clearTimeout(lifetime);
+    });
+  });
+
+  // DELETE terminates a session, and a stateless server has none to end.
+  // Left as 405 deliberately: the spec allows it and no observed client
+  // depends on it. Revisit only if the access log shows it being retried.
+  app.delete("/mcp", (_req: Request, res: Response) => {
     res.status(405).json({
       jsonrpc: "2.0",
       error: {
@@ -576,9 +636,7 @@ async function startHttp(): Promise<void> {
       },
       id: null,
     });
-  };
-  app.get("/mcp", methodNotAllowed);
-  app.delete("/mcp", methodNotAllowed);
+  });
 
   const port = Number(process.env.PORT || 8080);
   app.listen(port, () => {
