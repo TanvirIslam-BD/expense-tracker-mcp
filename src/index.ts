@@ -12,7 +12,7 @@ import type { ExpenseStore } from "./store/types.js";
 import { getOidcProvider, OIDC_MOUNT_PATH, resolveOAuthUserId } from "./auth/oidc-provider.js";
 import { mountOidcInteractions } from "./auth/oidc-routes.js";
 import { mcpizeAuthorizationServerIssuers } from "./auth/mcpize-oauth.js";
-import { currentMonth, formatMoney, isValidMonth, resolveUserId } from "./util.js";
+import { currentMonth, formatMoney, isValidMonth, resolveTursoConfig, resolveUserId } from "./util.js";
 
 /**
  * Transport selection, computed up front so `createStore()` can pick a sane
@@ -27,28 +27,6 @@ function useHttp(): boolean {
   return Boolean(process.env.PORT);
 }
 
-/**
- * TURSO_DATABASE_URL may embed its auth token as a query param
- * (`libsql://xxx.turso.io?authToken=...`), which lets a single secret cover a
- * remote Turso database on hosts (like MCPize's free tier) that cap you at
- * one secret. A separate TURSO_AUTH_TOKEN env var is also honored, so a
- * two-secret setup works too — the embedded token wins if both are present.
- */
-function resolveTursoConfig(): { url: string; authToken?: string } | null {
-  const raw = process.env.TURSO_DATABASE_URL;
-  if (!raw) return null;
-  try {
-    const parsed = new URL(raw);
-    const embeddedToken = parsed.searchParams.get("authToken");
-    if (embeddedToken) {
-      parsed.searchParams.delete("authToken");
-      return { url: parsed.toString(), authToken: embeddedToken };
-    }
-  } catch {
-    // Not a parseable URL (e.g. a local `file:./data.db` path) — use as-is.
-  }
-  return { url: raw, authToken: process.env.TURSO_AUTH_TOKEN };
-}
 
 /**
  * Local/stdio use (plugin installs, MCP Inspector, self-hosting) has no

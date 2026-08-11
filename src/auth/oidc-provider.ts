@@ -1,5 +1,7 @@
 import Provider from "oidc-provider";
 import { createHash } from "node:crypto";
+import { createOidcAdapterFactory } from "./oidc-store.js";
+import { resolveTursoConfig } from "../util.js";
 
 /**
  * Stable per-email account id for an OAuth-authenticated user.
@@ -31,11 +33,11 @@ let provider: Provider | null = null;
  * user-facing consent screen is Claude's own, shown before it ever reaches
  * this server.
  *
- * Uses oidc-provider's default in-memory adapter. That means authorization
- * codes/sessions/tokens do NOT survive a process restart or a second
- * instance — the same limitation MemoryStore documents for expense data.
- * Before production use behind more than one instance, wire a persistent
- * Adapter (e.g. backed by TursoStore) via the `adapter` config option.
+ * Records are persisted to the same libSQL/Turso database as the expense data
+ * whenever TURSO_DATABASE_URL is set — see oidc-store.ts. Without it, this falls
+ * back to oidc-provider's in-memory adapter, which is usable for local
+ * development and nothing else: codes, tokens, sessions and registered clients
+ * do not survive a restart or reach a second instance.
  */
 export function getOidcProvider(): Provider {
   if (provider) return provider;
@@ -59,7 +61,28 @@ export function getOidcProvider(): Provider {
     );
   }
 
+  /*
+   * Durable storage wherever a database is configured.
+   *
+   * Without this, oidc-provider keeps codes, tokens, sessions and dynamically
+   * registered clients in a process-local Map -- so on any host that runs more
+   * than one instance, or recycles them, the request that starts an
+   * authorization and the one that completes it do not share state and every
+   * sign-in fails. The in-memory default is left in place only for local dev,
+   * where a single process serves the whole flow, and it says so loudly.
+   */
+  const turso = resolveTursoConfig();
+  if (!turso) {
+    console.error(
+      "[oidc] no TURSO_DATABASE_URL — authorization codes, tokens, sessions and " +
+        "registered clients will be kept in memory and lost on restart. Fine for " +
+        "local development; sign-in will fail on any multi-instance or " +
+        "scale-to-zero host.",
+    );
+  }
+
   provider = new Provider(issuer, {
+    ...(turso ? { adapter: createOidcAdapterFactory(turso.url, turso.authToken) } : {}),
     clients: process.env.OAUTH_CLIENT_ID
       ? [
           {
