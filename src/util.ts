@@ -209,32 +209,69 @@ export function priorBudgetWindows(
 // Per-user isolation
 // ---------------------------------------------------------------------------
 
+const IDENTITY_HEADERS = ["x-mcpize-user-id", "x-mcpize-user", "x-user-id"] as const;
+
 /**
- * Resolve a stable, per-subscriber user id from an HTTP request. MCPize routes
- * each subscriber's traffic with their own credential; we key data off it so
- * subscribers can never see each other's expenses. Explicit id headers win;
- * otherwise the auth token is hashed into a stable opaque id.
+ * Whether this deployment may believe caller-supplied identity.
+ *
+ * Behind MCPize's gateway, `x-mcpize-user-id` is injected by the platform and
+ * any client-supplied copy is stripped, so trusting it is correct and is the
+ * only identity that route has. On a directly reachable deployment the same
+ * header is just a request header anyone can set -- `x-user-id: <someone>` would
+ * hand over that person's entire financial history with no token at all.
+ *
+ * There is no way to tell the two apart from the request itself: every header a
+ * gateway could inject, a client could forge. So it is a deployment decision,
+ * declared explicitly, and it defaults to NOT trusted. Getting that default
+ * wrong in the safe direction costs an outage; wrong in the other direction
+ * costs everyone's data.
+ *
+ * The MCPize deployment MUST set TRUST_GATEWAY_IDENTITY_HEADERS=1. A directly
+ * exposed deployment must never set it, and authenticates with OAuth instead.
+ */
+export function gatewayIdentityTrusted(): boolean {
+  return String(process.env.TRUST_GATEWAY_IDENTITY_HEADERS || "").trim() === "1";
+}
+
+let loggedUntrustedHeaders = false;
+
+/**
+ * Resolve a stable, per-subscriber user id from an HTTP request, for deployments
+ * whose identity arrives from a trusted gateway rather than from a token this
+ * server issued itself.
+ *
+ * Returns null when identity headers cannot be trusted, so a caller that also
+ * supports OAuth is left with the validated token as its only route in -- see
+ * `resolveOAuthUserId`.
  */
 export function resolveUserId(req: Request): string | null {
+  if (!gatewayIdentityTrusted()) {
+    if (!loggedUntrustedHeaders && IDENTITY_HEADERS.some((name) => req.header(name))) {
+      loggedUntrustedHeaders = true;
+      console.error(
+        "[auth] identity headers present but ignored: TRUST_GATEWAY_IDENTITY_HEADERS is not set. " +
+          "Set it to 1 only where a gateway injects them and strips client-supplied copies.",
+      );
+    }
+    // Still honoured: an operator setting this on their own single-user install
+    // is declaring the identity, not asking us to believe a caller.
+    return process.env.DEFAULT_USER_ID || null;
+  }
+
   // 1. Stable per-subscriber id from the host. MCPize sends `x-mcpize-user-id`;
   //    this MUST be checked first. (MCPize rotates the `authorization` bearer
   //    token per request, so hashing it would fragment a user's data across
   //    buckets — see step 2.)
-  const explicit = (
-    req.header("x-mcpize-user-id") ||
-    req.header("x-mcpize-user") ||
-    req.header("x-user-id") ||
-    ""
-  ).trim();
-  if (explicit) return explicit;
+  for (const name of IDENTITY_HEADERS) {
+    const explicit = (req.header(name) || "").trim();
+    if (explicit) return explicit;
+  }
 
   // 2. A *stable* API token identifies a non-MCPize client. Different clients
   //    have different tokens → different hashes, so this never co-mingles
   //    users; at worst it fragments one client whose token rotates.
   const auth = (req.header("authorization") || req.header("x-api-key") || "").trim();
-  if (auth) {
-    return "u_" + createHash("sha256").update(auth).digest("hex").slice(0, 16);
-  }
+  if (auth) return deriveApiTokenUserId(auth);
 
   // 3. Opt-in single-user mode for self-hosting.
   if (process.env.DEFAULT_USER_ID) return process.env.DEFAULT_USER_ID;
@@ -243,6 +280,20 @@ export function resolveUserId(req: Request): string | null {
   //    into a shared bucket: for a finance server, letting unrelated
   //    unidentified callers share data would be a real privacy breach.
   return null;
+}
+
+/**
+ * A stable id for a client that authenticates with a fixed API token.
+ *
+ * Domain-separated and prefixed apart from the OAuth namespace, which is what
+ * makes this safe. Both used to be `"u_" + sha256(input)`, so hashing an
+ * `Authorization` header whose value happened to be a user's email address
+ * produced that user's OAuth id exactly -- `Authorization: victim@example.com`
+ * was full access to their finances, knowing nothing but the address. Two id
+ * spaces derived from attacker-controlled input must not be able to meet.
+ */
+export function deriveApiTokenUserId(token: string): string {
+  return "k_" + createHash("sha256").update(`mcp-api-token:${token.trim()}`).digest("hex").slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------

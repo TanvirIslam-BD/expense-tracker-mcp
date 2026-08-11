@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Request } from "express";
 import {
   toMinor,
@@ -74,6 +74,22 @@ describe("dates", () => {
 });
 
 describe("resolveUserId", () => {
+  /*
+   * These describe a deployment behind MCPize's gateway, which injects the
+   * identity headers and strips client-supplied copies. That trust is now
+   * declared per deployment rather than assumed: a directly reachable server
+   * must not believe a header anyone can set. See tests/identity-trust.test.ts.
+   */
+  let savedTrust: string | undefined;
+  beforeEach(() => {
+    savedTrust = process.env.TRUST_GATEWAY_IDENTITY_HEADERS;
+    process.env.TRUST_GATEWAY_IDENTITY_HEADERS = "1";
+  });
+  afterEach(() => {
+    if (savedTrust === undefined) delete process.env.TRUST_GATEWAY_IDENTITY_HEADERS;
+    else process.env.TRUST_GATEWAY_IDENTITY_HEADERS = savedTrust;
+  });
+
   it("prioritises x-mcpize-user-id (MCPize's stable subscriber id) above all", () => {
     // Even with other id headers and a rotating auth token present, the
     // MCPize subscriber id must win — this is the fix for the isolation bug.
@@ -99,7 +115,10 @@ describe("resolveUserId", () => {
     const b = resolveUserId(fakeReq({ authorization: "Bearer token-B" }));
     expect(a1).toBe(a2); // stable for the same token
     expect(a1).not.toBe(b); // different token -> different bucket (no co-mingling)
-    expect(a1?.startsWith("u_")).toBe(true);
+    // "k_", not "u_": the OAuth namespace must be unreachable from a header, or
+    // hashing an Authorization value that happens to be a user's email address
+    // lands in that user's account. See tests/identity-trust.test.ts.
+    expect(a1?.startsWith("k_")).toBe(true);
   });
 
   it("FAILS CLOSED (null) when unidentified and no DEFAULT_USER_ID", () => {
