@@ -2,11 +2,18 @@ import Provider from "oidc-provider";
 import { createHash } from "node:crypto";
 
 /**
- * Stable per-email account id, using the same "u_" + sha256-prefix scheme
- * `resolveUserId` already uses for API-key clients (see util.ts). Reusing the
- * scheme means an OAuth-authenticated user and a pre-existing API-key user
- * with the same underlying identity land in the same data bucket instead of
- * silently forking into two.
+ * Stable per-email account id for an OAuth-authenticated user.
+ *
+ * This deliberately no longer shares a derivation with the API-token fallback in
+ * util.ts. Both were `"u_" + sha256(input)`, and the intent was that an
+ * API-key client and an OAuth user with the same underlying identity would land
+ * in one bucket. The effect was an authentication bypass: the API-token path
+ * hashed the raw `Authorization` header, so sending `Authorization:
+ * victim@example.com` derived that victim's OAuth id exactly, and knowing an
+ * email address was enough to read and write their finances.
+ *
+ * The two spaces are now separated by prefix and by hash domain. Nothing else
+ * may be keyed into the "u_" space from caller-controlled input.
  */
 export function deriveOAuthUserId(email: string): string {
   return "u_" + createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 16);
