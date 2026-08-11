@@ -209,6 +209,33 @@ export function priorBudgetWindows(
 // Per-user isolation
 // ---------------------------------------------------------------------------
 
+/**
+ * TURSO_DATABASE_URL may embed its auth token as a query param
+ * (`libsql://xxx.turso.io?authToken=...`), which lets a single secret cover a
+ * remote Turso database on hosts (like MCPize's free tier) that cap you at one
+ * secret. A separate TURSO_AUTH_TOKEN env var is also honored, so a two-secret
+ * setup works too — the embedded token wins if both are present.
+ *
+ * Lives here rather than in index.ts because the OAuth server needs the same
+ * database for its own records, and a second copy of this parsing would be a
+ * second thing to get wrong.
+ */
+export function resolveTursoConfig(): { url: string; authToken?: string } | null {
+  const raw = process.env.TURSO_DATABASE_URL;
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    const embeddedToken = parsed.searchParams.get("authToken");
+    if (embeddedToken) {
+      parsed.searchParams.delete("authToken");
+      return { url: parsed.toString(), authToken: embeddedToken };
+    }
+  } catch {
+    // Not a parseable URL (e.g. a local `file:./data.db` path) — use as-is.
+  }
+  return { url: raw, authToken: process.env.TURSO_AUTH_TOKEN };
+}
+
 const IDENTITY_HEADERS = ["x-mcpize-user-id", "x-mcpize-user", "x-user-id"] as const;
 
 /**
